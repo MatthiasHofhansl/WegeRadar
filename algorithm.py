@@ -6,12 +6,48 @@ import gpxpy
 import gpxpy.gpx
 import requests
 from math import radians, cos, sin, asin, sqrt
+import time
 
 # OpenStreetMap Nominatim für Reverse-Geocoding
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 USER_AGENT = "WegeRadarApp/1.0 (your_email@example.com)"
 
+# Liste möglicher Overpass-API-Endpunkte
+OVERPASS_SERVERS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.openstreetmap.fr/api/interpreter",
+    "https://lz4.overpass-api.de/api/interpreter"
+]
+
+# Cache für den schnellsten Server
+_fastest_overpass = None
+
+def _choose_overpass_url():
+    global _fastest_overpass
+    if _fastest_overpass:
+        return _fastest_overpass
+
+    timings = {}
+    test_query = "[out:json][timeout:1];node(0);out;"
+    headers = {"User-Agent": USER_AGENT}
+    for url in OVERPASS_SERVERS:
+        try:
+            start = time.time()
+            resp = requests.get(url, params={"data": test_query}, headers=headers, timeout=5)
+            resp.raise_for_status()
+            timings[url] = time.time() - start
+        except Exception:
+            # Server nicht erreichbar oder Timeout => überspringen
+            continue
+
+    if not timings:
+        # Fallback auf den ersten
+        _fastest_overpass = OVERPASS_SERVERS[0]
+    else:
+        # Wähle URL mit minimaler Antwortzeit
+        _fastest_overpass = min(timings, key=timings.get)
+
+    return _fastest_overpass
 
 def show_date_dialog(master, gpx_folder, last, first):
     prefix = f"{last}_{first}_"
@@ -47,14 +83,12 @@ def show_date_dialog(master, gpx_folder, last, first):
     master.wait_window(dialog)
     return selected["date"]
 
-
 def haversine(lat1, lon1, lat2, lon2):
     lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
     dlon, dlat = lon2 - lon1, lat2 - lat1
     a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
     c = 2 * asin(sqrt(a))
     return 6371000 * c  # Meter
-
 
 def reverse_geocode(lat, lon):
     params = {"format": "jsonv2", "lat": lat, "lon": lon, "zoom": 18, "addressdetails": 1}
@@ -64,8 +98,12 @@ def reverse_geocode(lat, lon):
     data = r.json()
     return data.get("display_name", "Adresse nicht verfügbar")
 
-
 def lookup_pois(lat, lon, radius=15):
+    """
+    Holt POIs innerhalb des gegebenen Radius via Overpass.
+    Wählt dabei dynamisch den schnellsten Server aus.
+    """
+    overpass_url = _choose_overpass_url()
     query = f"""
 [out:json];
 (
@@ -74,11 +112,11 @@ def lookup_pois(lat, lon, radius=15):
 );
 out center;
 """
-    r = requests.post(OVERPASS_URL, data={"data": query}, headers={"User-Agent": USER_AGENT}, timeout=15)
+    headers = {"User-Agent": USER_AGENT}
+    r = requests.post(overpass_url, data={"data": query}, headers=headers, timeout=15)
     r.raise_for_status()
     elements = r.json().get("elements", [])
     return list({el.get("tags", {}).get("name") for el in elements if el.get("tags", {}).get("name")})
-
 
 def analyze_gpx(gpx_folder, last, first, date, radius=15, min_duration_sec=300):
     filename = f"{last}_{first}_{date}.gpx"
