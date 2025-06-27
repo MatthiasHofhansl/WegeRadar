@@ -1,7 +1,8 @@
 # benutzeroberfläche.py
 import os
+import threading
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 import importlib
 import algorithm  # stellt sicher, dass das Modul beim Start geladen ist
 
@@ -236,13 +237,6 @@ class WegeRadar:
             )
 
     def on_name_click(self, last, first):
-        """
-        Zeigt rechts von der Liste:
-        - Überschrift mit kleinem "Teilnehmer(in): Nachname, Vorname"
-        - Rotes Kreuz zum Schließen
-        - Datum der GPX-Datei-Auswahl
-        - Liste der Aufenthaltsorte mit Dauer und POIs
-        """
         # Alte Detail-Inhalte löschen
         for w in self.content_frame.winfo_children():
             w.destroy()
@@ -275,6 +269,30 @@ class WegeRadar:
         if not date:
             return
 
+        # Lade-Dialog mit Progressbar
+        loader = tk.Toplevel(self.master)
+        loader.title("Bitte warten...")
+        loader.geometry("300x80")
+        loader.transient(self.master)
+        loader.grab_set()
+        tk.Label(loader, text="Daten werden geladen...", font=("Arial", 12)).pack(pady=10)
+        progress = ttk.Progressbar(loader, mode="indeterminate")
+        progress.pack(fill="x", padx=20, pady=(0,10))
+        progress.start()
+
+        # Analyse in Hintergrund-Thread
+        def run_analysis():
+            stops = algorithm.analyze_gpx(self.gpx_path, last, first, date)
+            # zurück in den GUI-Thread
+            self.master.after(0, lambda: self.show_stops(loader, progress, date, stops))
+
+        threading.Thread(target=run_analysis, daemon=True).start()
+
+    def show_stops(self, loader, progress, date, stops):
+        # Lade-Dialog schließen
+        progress.stop()
+        loader.destroy()
+
         # Datum-Label
         tk.Label(
             self.content_frame,
@@ -291,8 +309,7 @@ class WegeRadar:
             height=2
         ).pack(fill="x", pady=(0, 10))
 
-        # Analysiere GPX und zeige Aufenthaltsorte
-        stops = algorithm.analyze_gpx(self.gpx_path, last, first, date)
+        # Falls keine Stops
         if not stops:
             tk.Label(
                 self.content_frame,
@@ -304,6 +321,7 @@ class WegeRadar:
             ).pack(fill="x", padx=20, pady=5)
             return
 
+        # Anzeige der Aufenthaltsorte
         for stop in stops:
             frame = tk.Frame(self.content_frame, bg="white")
             frame.pack(fill="x", padx=20, pady=5)
