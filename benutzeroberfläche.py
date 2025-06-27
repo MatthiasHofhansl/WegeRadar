@@ -151,16 +151,16 @@ class WegeRadar:
 
         # Dateien aus Ordner auslesen und Namen sortieren
         files = [f for f in os.listdir(self.gpx_path) if f.lower().endswith('.gpx')]
-        names = []
+        names_set = set()
         for f in files:
             base = os.path.splitext(f)[0]
             parts = base.split('_')
             if len(parts) >= 2:
                 last = parts[0]
                 first = parts[1]
-                names.append((last, first))
+                names_set.add((last, first))
         # Alphabetisch nach Nachname sortieren
-        names.sort(key=lambda x: x[0])
+        names = sorted(names_set, key=lambda x: x[0])
 
         # Anzeige
         for last, first in names:
