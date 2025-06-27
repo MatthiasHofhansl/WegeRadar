@@ -136,13 +136,27 @@ class WegeRadar:
         except:
             self.master.attributes('-zoomed', True)  # macOS
 
-        # Linke Box für GPX-Dateien-Liste
-        left_frame = tk.Frame(self.master, bg="white", width=200)
-        left_frame.pack(side="left", fill="y")
+        # Scrollbarer Container für Teilnehmerliste
+        container = tk.Frame(self.master, bg="white", width=200)
+        container.pack(side="left", fill="y")
+        canvas = tk.Canvas(container, bg="white", width=200, highlightthickness=0)
+        scrollbar = tk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        scroll_frame = tk.Frame(canvas, bg="white")
+        scroll_frame.bind(
+            "<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        canvas.create_window((0,0), window=scroll_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="y", expand=True)
+        scrollbar.pack(side="right", fill="y")
 
-        # Titel in Box
+        # Vertikale Trennlinie rechts neben der Box
+        separator = tk.Frame(self.master, bg="black", width=2)
+        separator.pack(side="left", fill="y")
+
+        # Titel in Box mit Umbruch
         title = tk.Label(
-            left_frame,
+            scroll_frame,
             text="Teilnehmerinnen\nund Teilnehmer",
             font=("Arial", 14, "bold"),
             bg="white",
@@ -160,17 +174,23 @@ class WegeRadar:
                 last = parts[0]
                 first = parts[1]
                 names_set.add((last, first))
-        # Alphabetisch nach Nachname sortieren
         names = sorted(names_set, key=lambda x: x[0])
 
-        # Anzeige
+        # Anzeige mit automatischem Abschneiden
+        max_chars = 20
         for last, first in names:
+            full_name = f"{last}, {first}"
+            if len(full_name) > max_chars:
+                display_name = full_name[:max_chars-3] + "..."
+            else:
+                display_name = full_name
             lbl = tk.Label(
-                left_frame,
-                text=f"{last}, {first}",
+                scroll_frame,
+                text=display_name,
                 font=("Arial", 12),
                 bg="white",
-                anchor="w"
+                anchor="w",
+                width=20
             )
             lbl.pack(fill="x", padx=10, pady=2)
 
