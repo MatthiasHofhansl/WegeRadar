@@ -143,9 +143,10 @@ class WegeRadar:
         # Titel in Box
         title = tk.Label(
             left_frame,
-            text="Teilnehmer",
+            text="Teilnehmerinnen\nund Teilnehmer",
             font=("Arial", 14, "bold"),
-            bg="white"
+            bg="white",
+            justify="center"
         )
         title.pack(pady=(10, 5))
 
