@@ -113,19 +113,17 @@ class WegeRadar:
             self.gpx_label_selected.config(text=self.gpx_foldername)
 
     def start_action(self):
-        # Alles entfernen, Hintergrund weiß und Vollbild
+        # Alles entfernen, Hintergrund weiß
         self.master.title(APP_NAME)
         for widget in self.master.winfo_children():
             widget.destroy()
         self.master.configure(background="white")
-        # Vollbild-Modus aktivieren
+        # Fenster maximieren (mit Titel-Leiste weiterhin sichtbar)
         try:
-            self.master.attributes('-fullscreen', True)
+            self.master.state('zoomed')  # Windows/Linux
         except:
-            # Fallback Maximierung
-            w = self.master.winfo_screenwidth()
-            h = self.master.winfo_screenheight()
-            self.master.geometry(f"{w}x{h}+0+0")
+            # Alternative Maximierung auf macOS
+            self.master.attributes('-zoomed', True)
 
 if __name__ == "__main__":
     root = tk.Tk()
