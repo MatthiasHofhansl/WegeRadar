@@ -10,7 +10,7 @@ class WegeRadar:
         self.master = master
         master.title(APP_NAME)
 
-        # Fenstergröße und Zentrierung (enger, höher)
+        # Fenstergröße und Zentrierung
         window_width = 500
         window_height = 600
         screen_width = master.winfo_screenwidth()
@@ -85,6 +85,15 @@ class WegeRadar:
         )
         self.gpx_label_selected.grid(row=3, column=1, padx=5, pady=(5, 5))
 
+        # Start-Button am unteren Fensterrand
+        start_btn = tk.Button(
+            self.master,
+            text="Start",
+            command=self.start_action,
+            height=1
+        )
+        start_btn.pack(side="bottom", fill="x")
+
     def select_excel(self):
         path = filedialog.askopenfilename(
             title="Gebe hier den Pfad für deine Excel-Datei/das Wegetagebuch an:",
@@ -105,6 +114,10 @@ class WegeRadar:
         else:
             self.gpx_foldername = os.path.basename(path)
             self.gpx_label_selected.config(text=self.gpx_foldername)
+
+    def start_action(self):
+        # Platzhalter für Start-Aktion
+        messagebox.showinfo(APP_NAME, "Start wurde gedrückt!")
 
 
 if __name__ == "__main__":
