@@ -2,7 +2,7 @@ import os
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import importlib
-import algorithm  # muss im gleichen Verzeichnis liegen
+import algorithm  # stellt sicher, dass das Modul beim Start geladen ist
 
 # App-Name
 APP_NAME = "WegeRadar"
@@ -34,32 +34,28 @@ class WegeRadar:
 
     def setup_ui(self):
         # Willkommenstext
-        welcome = tk.Label(
+        tk.Label(
             self.master,
             text="Herzlich Willkommen!",
             font=("Arial", 24, "bold")
-        )
-        welcome.pack(pady=(20, 10))
+        ).pack(pady=(20, 10))
 
         # Container für Pfadauswahl
         frame = tk.Frame(self.master)
         frame.pack(pady=10)
 
         # Excel-Datei Auswahl
-        prompt_excel = tk.Label(
+        tk.Label(
             frame,
             text="Gebe hier den Pfad für deine Excel-Datei/das Wegetagebuch an:",
             font=("Arial", 12)
-        )
-        prompt_excel.grid(row=0, column=0, columnspan=2,
-                          sticky="w", padx=5, pady=(5, 0))
-        btn_excel = tk.Button(
+        ).grid(row=0, column=0, columnspan=2, sticky="w", padx=5, pady=(5, 0))
+        tk.Button(
             frame,
             text="Auswählen",
             command=self.select_excel,
             width=12
-        )
-        btn_excel.grid(row=1, column=0, padx=5, pady=(5, 5))
+        ).grid(row=1, column=0, padx=5, pady=(5, 5))
         self.excel_label_selected = tk.Label(
             frame,
             text="Keine Datei ausgewählt",
@@ -67,24 +63,20 @@ class WegeRadar:
             width=20,
             anchor="w"
         )
-        self.excel_label_selected.grid(row=1, column=1,
-                                       padx=5, pady=(5, 5))
+        self.excel_label_selected.grid(row=1, column=1, padx=5, pady=(5, 5))
 
         # GPX-Ordner Auswahl
-        prompt_gpx = tk.Label(
+        tk.Label(
             frame,
             text="Gebe hier den Pfad für den Ordner mit den GPX-Dateien an:",
             font=("Arial", 12)
-        )
-        prompt_gpx.grid(row=2, column=0, columnspan=2,
-                        sticky="w", padx=5, pady=(15, 0))
-        btn_gpx = tk.Button(
+        ).grid(row=2, column=0, columnspan=2, sticky="w", padx=5, pady=(15, 0))
+        tk.Button(
             frame,
             text="Auswählen",
             command=self.select_gpx,
             width=12
-        )
-        btn_gpx.grid(row=3, column=0, padx=5, pady=(5, 5))
+        ).grid(row=3, column=0, padx=5, pady=(5, 5))
         self.gpx_label_selected = tk.Label(
             frame,
             text="Keinen Ordner ausgewählt",
@@ -92,11 +84,10 @@ class WegeRadar:
             width=20,
             anchor="w"
         )
-        self.gpx_label_selected.grid(row=3, column=1,
-                                     padx=5, pady=(5, 5))
+        self.gpx_label_selected.grid(row=3, column=1, padx=5, pady=(5, 5))
 
         # Hinweistext über dem Start-Button
-        info_start = tk.Label(
+        tk.Label(
             self.master,
             text=(
                 "(Du musst nicht zwingend eine Excel-Datei/ein Wegetagebuch "
@@ -107,18 +98,16 @@ class WegeRadar:
             fg="gray",
             wraplength=self.window_width - 40,
             justify="center"
-        )
-        info_start.pack(fill="x", padx=20, pady=(0, 5))
+        ).pack(fill="x", padx=20, pady=(0, 5))
 
         # Start-Button bündig am unteren Fensterrand
-        start_btn = tk.Button(
+        tk.Button(
             self.master,
             text="Start",
             command=self.start_action,
             font=("Arial", 24, "bold"),
             height=2
-        )
-        start_btn.pack(side="bottom", fill="x")
+        ).pack(side="bottom", fill="x")
 
     def select_excel(self):
         path = filedialog.askopenfilename(
@@ -164,10 +153,8 @@ class WegeRadar:
         # Scrollbarer Container für Namen
         container = tk.Frame(self.master, bg="white", width=200)
         container.pack(side="left", fill="y")
-        canvas = tk.Canvas(container, bg="white", width=200,
-                           highlightthickness=0)
-        scrollbar = tk.Scrollbar(container, orient="vertical",
-                                 command=canvas.yview)
+        canvas = tk.Canvas(container, bg="white", width=200, highlightthickness=0)
+        scrollbar = tk.Scrollbar(container, orient="vertical", command=canvas.yview)
         scroll_frame = tk.Frame(canvas, bg="white")
         scroll_frame.bind(
             "<Configure>",
@@ -199,26 +186,23 @@ class WegeRadar:
         ))
 
         # Vertikale Trennlinie rechts neben der Box
-        separator = tk.Frame(self.master, bg="black", width=2)
-        separator.pack(side="left", fill="y")
+        tk.Frame(self.master, bg="black", width=2).pack(side="left", fill="y")
 
         # Container für Detailansicht rechts
         self.content_frame = tk.Frame(self.master, bg="white")
         self.content_frame.pack(side="left", fill="both", expand=True)
 
-        # Titel in Box
-        title = tk.Label(
+        # Titel in Box (links)
+        tk.Label(
             scroll_frame,
             text="Teilnehmerinnen\nund Teilnehmer",
             font=("Arial", 14, "bold"),
             bg="white",
             justify="center"
-        )
-        title.pack(pady=(10, 5))
+        ).pack(pady=(10, 5))
 
         # Namen aus GPX-Dateien einlesen und sortieren
-        files = [f for f in os.listdir(self.gpx_path)
-                 if f.lower().endswith('.gpx')]
+        files = [f for f in os.listdir(self.gpx_path) if f.lower().endswith('.gpx')]
         names_set = set()
         for f in files:
             base = os.path.splitext(f)[0]
@@ -232,8 +216,7 @@ class WegeRadar:
         max_chars = 20
         for last, first in names:
             full_name = f"{last}, {first}"
-            display_name = (full_name[:max_chars-3] + "..."
-                            ) if len(full_name) > max_chars else full_name
+            display_name = (full_name[:max_chars-3] + "...") if len(full_name) > max_chars else full_name
             lbl = tk.Label(
                 scroll_frame,
                 text=display_name,
@@ -244,11 +227,8 @@ class WegeRadar:
             )
             lbl.pack(fill="x", padx=10, pady=2)
 
-            # Hover-Effekt
             lbl.bind("<Enter>", lambda e, l=lbl: l.config(bg="#e0e0e0"))
             lbl.bind("<Leave>", lambda e, l=lbl: l.config(bg="white"))
-
-            # Klick-Event: ruft algorithm.show_date_dialog UND zeigt Detail-View
             lbl.bind(
                 "<Button-1>",
                 lambda e, last=last, first=first: self.on_name_click(last, first)
@@ -257,25 +237,25 @@ class WegeRadar:
     def on_name_click(self, last, first):
         """
         Zeigt rechts von der Liste:
-        - Überschrift mit "Teilnehmer(in): Nachname, Vorname"
+        - Überschrift mit kleinem "Teilnehmer(in): Nachname, Vorname"
         - Rotes Kreuz zum Schließen
-        - Ruft show_date_dialog aus algorithm.py auf, falls nötig
+        - Datum der GPX-Datei
         """
-        # Clear content_frame
+        # Alte Detail-Inhalte löschen
         for w in self.content_frame.winfo_children():
             w.destroy()
 
-        # Überschrift
+        # Header (Arial 14 Bold)
         header = tk.Label(
             self.content_frame,
             text=f"Teilnehmer(in): {last}, {first}",
-            font=("Arial", 16, "bold"),
+            font=("Arial", 14, "bold"),
             bg="white",
             anchor="w"
         )
-        header.pack(fill="x", padx=20, pady=(20, 10))
+        header.pack(fill="x", padx=20, pady=(20, 5))
 
-        # Rotes Kreuz zum Schließen der Detail-Ansicht
+        # Close-Kreuz oben rechts
         close_btn = tk.Button(
             self.content_frame,
             text="✖",
@@ -283,19 +263,21 @@ class WegeRadar:
             fg="red",
             bg="white",
             bd=0,
-            command=self._close_detail
+            command=lambda: [w.destroy() for w in self.content_frame.winfo_children()]
         )
-        # oben rechts platzieren (10px Abstand von rechten Rand)
         close_btn.place(relx=1.0, x=-10, y=10, anchor="ne")
 
-        # GPX-Auswahl-Dialog aufrufen (wichtig: Dialog öffnet sich über content_frame)
+        # Datumsauswahl per algorithm.show_date_dialog
         importlib.reload(algorithm)
-        algorithm.show_date_dialog(self.master, self.gpx_path, last, first)
-
-    def _close_detail(self):
-        # entfernt alle Widgets in content_frame, gibt den Fokus zurück
-        for w in self.content_frame.winfo_children():
-            w.destroy()
+        date = algorithm.show_date_dialog(self.master, self.gpx_path, last, first)
+        if date:
+            tk.Label(
+                self.content_frame,
+                text=f"Datum der GPX-Datei: {date}",
+                font=("Arial", 14),
+                bg="white",
+                anchor="w"
+            ).pack(fill="x", padx=20, pady=(5, 10))
 
 if __name__ == "__main__":
     root = tk.Tk()

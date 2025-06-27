@@ -7,7 +7,8 @@ def show_date_dialog(master, gpx_folder, last, first):
     """
     Öffnet einen Dialog mit allen verfügbaren GPX-Dateien für
     last_first_<Datum>.gpx im Ordner und lässt den Nutzer ein Datum wählen.
-    Wenn nur eine Datei existiert, wird direkt diese ausgewählt.
+    Gibt das ausgewählte Datum zurück. Wenn nur eine Datei existiert,
+    wird direkt dieses Datum zurückgegeben.
     """
     prefix = f"{last}_{first}_"
     files = [
@@ -21,16 +22,9 @@ def show_date_dialog(master, gpx_folder, last, first):
             f"Keine GPX-Dateien für {last}, {first} gefunden.",
             parent=master
         )
-        return
+        return None
 
-    # Wenn nur eine Datei vorhanden ist, direkt auswählen
-    if len(files) == 1:
-        filename = files[0]
-        fullpath = os.path.join(gpx_folder, filename)
-        print(f"Ausgewählte GPX-Datei: {fullpath}")
-        return
-
-    # Mehrere Dateien: Datum → Dateiname mappen
+    # Datum → Dateiname mappen
     date_map = {}
     for f in files:
         base = os.path.splitext(f)[0]
@@ -38,40 +32,42 @@ def show_date_dialog(master, gpx_folder, last, first):
         date = parts[2] if len(parts) >= 3 else "Unbekannt"
         date_map[date] = f
 
-    dates = sorted(date_map.keys())
+    # Wenn nur eine Datei vorhanden ist, direkt zurückgeben
+    if len(date_map) == 1:
+        date = next(iter(date_map))
+        fullpath = os.path.join(gpx_folder, date_map[date])
+        print(f"Ausgewählte GPX-Datei: {fullpath}")
+        return date
 
-    # Dialogfenster für die Datumsauswahl
+    # Mehrere Dateien → Auswahl-Dialog
+    dates = sorted(date_map.keys())
+    selected = {"date": None}
+
     dialog = tk.Toplevel(master)
     dialog.title("GPX-Datei Auswahl")
     dialog.transient(master)
     dialog.grab_set()
 
-    # Frage-Label mittig
-    lbl = tk.Label(
+    tk.Label(
         dialog,
-        text="Für diese(n) Teilnehmer(in) stehen mehrere GPX-Dateien zur Verfügung. An welchem Tag soll die auszuwählende GPX-Datei aufgezeichnet worden sein?",
+        text=(
+            "Für diese(n) Teilnehmer(in) stehen mehrere GPX-Dateien zur Verfügung.\n"
+            "An welchem Tag soll die auszuwählende GPX-Datei aufgezeichnet worden sein?"
+        ),
         font=("Arial", 12),
         justify="center",
         wraplength=300
-    )
-    lbl.pack(pady=(10, 10), padx=10)
+    ).pack(pady=(10, 10), padx=10)
 
-    # Auswahl-Callback
     def select(d):
+        selected["date"] = d
         filename = date_map[d]
         fullpath = os.path.join(gpx_folder, filename)
         print(f"Ausgewählte GPX-Datei: {fullpath}")
         dialog.destroy()
 
-    # Buttons für jedes Datum
     for d in dates:
-        btn = tk.Button(
-            dialog,
-            text=d,
-            width=20,
-            command=lambda d=d: select(d)
-        )
-        btn.pack(pady=2, padx=20)
+        tk.Button(dialog, text=d, width=20, command=lambda d=d: select(d)).pack(pady=2, padx=20)
 
     # Dialog zentrieren
     dialog.update_idletasks()
@@ -84,3 +80,4 @@ def show_date_dialog(master, gpx_folder, last, first):
     dialog.geometry(f"{w}x{h}+{x}+{y}")
 
     master.wait_window(dialog)
+    return selected["date"]
