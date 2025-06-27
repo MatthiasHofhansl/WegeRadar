@@ -45,7 +45,53 @@ def _choose_overpass_url():
     _fastest_overpass = min(timings, key=timings.get) if timings else OVERPASS_SERVERS[0]
     return _fastest_overpass
 
+def reverse_geocode(lat, lon):
+    """Nominatim-Request mit 1 s Pause und Cache."""
+    key = (round(lat, 5), round(lon, 5))
+    if key in _reverse_cache:
+        return _reverse_cache[key]
+
+    params = {"lat": lat, "lon": lon, "format": "jsonv2", "zoom": 18, "addressdetails": 1}
+    r = _session.get(NOMINATIM_URL, params=params, timeout=10)
+    r.raise_for_status()
+    addr = r.json().get("display_name", "Adresse nicht verfügbar")
+
+    time.sleep(1)
+    _reverse_cache[key] = addr
+    return addr
+
+def lookup_pois(lat, lon, radius=15):
+    """Overpass-Request mit 1 s Pause und Cache."""
+    key = (round(lat, 5), round(lon, 5), radius)
+    if key in _pois_cache:
+        return _pois_cache[key]
+
+    overpass_url = _choose_overpass_url()
+    query = f"""
+[out:json][timeout:25];
+(
+  node(around:{radius},{lat},{lon})[amenity];
+  way(around:{radius},{lat},{lon})[amenity];
+);
+out center;
+"""
+    r = _session.post(overpass_url, data={"data": query}, timeout=30)
+    r.raise_for_status()
+    elements = r.json().get("elements", [])
+
+    pois = []
+    for el in elements:
+        name = el.get("tags", {}).get("name")
+        if name:
+            pois.append(name)
+    pois = list(dict.fromkeys(pois))
+
+    time.sleep(1)
+    _pois_cache[key] = pois
+    return pois
+
 def show_date_dialog(master, gpx_folder, last, first):
+    """Dialog zur Auswahl einer GPX-Datei nach Datum."""
     prefix = f"{last}_{first}_"
     files = [f for f in os.listdir(gpx_folder)
              if f.startswith(prefix) and f.lower().endswith('.gpx')]
@@ -94,92 +140,60 @@ def haversine(lat1, lon1, lat2, lon2):
     a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
     return 6371000 * 2 * asin(sqrt(a))
 
-def reverse_geocode(lat, lon):
-    """Nominatim-Request mit 1 s Pause und Cache."""
-    key = (round(lat, 5), round(lon, 5))
-    if key in _reverse_cache:
-        return _reverse_cache[key]
-
-    params = {"lat": lat, "lon": lon, "format": "jsonv2", "zoom": 18, "addressdetails": 1}
-    r = _session.get(NOMINATIM_URL, params=params, timeout=10)
-    r.raise_for_status()
-    addr = r.json().get("display_name", "Adresse nicht verfügbar")
-
-    time.sleep(1)
-    _reverse_cache[key] = addr
-    return addr
-
-def lookup_pois(lat, lon, radius=15):
-    """Overpass-Request mit 1 s Pause und Cache."""
-    key = (round(lat, 5), round(lon, 5), radius)
-    if key in _pois_cache:
-        return _pois_cache[key]
-
-    overpass_url = _choose_overpass_url()
-    query = f"""
-[out:json][timeout:25];
-(
-  node(around:{radius},{lat},{lon})[amenity];
-  way(around:{radius},{lat},{lon})[amenity];
-);
-out center;
-"""
-    r = _session.post(overpass_url, data={"data": query}, timeout=30)
-    r.raise_for_status()
-    elements = r.json().get("elements", [])
-
-    pois = []
-    for el in elements:
-        name = el.get("tags", {}).get("name")
-        if name:
-            pois.append(name)
-    pois = list(dict.fromkeys(pois))
-
-    time.sleep(1)
-    _pois_cache[key] = pois
-    return pois
-
-def detect_stops(points, radius, min_duration_sec):
+def detect_stops(points, distance_threshold=20, min_duration_sec=180):
     """
-    Sliding-Window-Ansatz:
-    Erkenne Stopps, wenn über min_duration_sec alle Aufzeichnungs-Punkte
-    innerhalb radius liegen – auch bei Lücken.
+    Erkennung von Stopps:
+    - Punkte bleiben ≤ distance_threshold Meter beieinander
+    - Gesamtdauer ≥ min_duration_sec Sekunden
     """
     stops = []
-    n = len(points)
-    i = 0
-    while i < n:
-        # Suche j so, dass Zeitdifferenz >= min_duration_sec
-        j = i + 1
-        while j < n and (points[j][2] - points[i][2]).total_seconds() < min_duration_sec:
-            j += 1
-        if j >= n:
-            break
+    if not points:
+        return stops
 
-        # Prüfe, ob alle Punkte i…j im radius um Punkte[i] liegen
-        base_lat, base_lon = points[i][0], points[i][1]
-        window = points[i:j+1]
-        if all(haversine(base_lat, base_lon, p[0], p[1]) <= radius for p in window):
-            start, end = points[i][2], points[j][2]
-            mid_lat = sum(p[0] for p in window) / len(window)
-            mid_lon = sum(p[1] for p in window) / len(window)
-            stops.append({
-                "start_time": start,
-                "end_time": end,
-                "duration_seconds": (end - start).total_seconds(),
-                "latitude": mid_lat,
-                "longitude": mid_lon
-            })
-            # überspringe das Fenster
-            i = j + 1
+    # Cluster mit der ersten Koordinate starten
+    start_lat, start_lon, start_time = points[0]
+    prev_lat, prev_lon = start_lat, start_lon
+    cluster_start = start_time
+    cluster_end = start_time
+
+    for lat, lon, t in points[1:]:
+        if haversine(prev_lat, prev_lon, lat, lon) <= distance_threshold:
+            # im selben Cluster bleiben
+            cluster_end = t
         else:
-            i += 1
+            # Cluster beenden und ggf. speichern
+            duration = (cluster_end - cluster_start).total_seconds()
+            if duration >= min_duration_sec:
+                stops.append({
+                    "start_time": cluster_start,
+                    "end_time": cluster_end,
+                    "latitude": start_lat,
+                    "longitude": start_lon,
+                    "duration_seconds": duration
+                })
+            # neuen Cluster starten
+            start_lat, start_lon = lat, lon
+            cluster_start = t
+            cluster_end = t
+        prev_lat, prev_lon = lat, lon
+
+    # Letzten Cluster prüfen
+    duration = (cluster_end - cluster_start).total_seconds()
+    if duration >= min_duration_sec:
+        stops.append({
+            "start_time": cluster_start,
+            "end_time": cluster_end,
+            "latitude": start_lat,
+            "longitude": start_lon,
+            "duration_seconds": duration
+        })
+
     return stops
 
 def analyze_gpx(gpx_folder, last, first, date, radius=15, min_duration_sec=300):
     """
-    Parst GPX, erkennt Stopps robust mit detect_stops(),
-    sortiert chronologisch und reichert mit Adresse/POIs an.
+    Parst die GPX-Datei, erkennt Stopps mittels detect_stops(),
+    und reichert die Ergebnisse mit Adresse und POIs an.
     """
     filename = f"{last}_{first}_{date}.gpx"
     path = os.path.join(gpx_folder, filename)
@@ -189,24 +203,27 @@ def analyze_gpx(gpx_folder, last, first, date, radius=15, min_duration_sec=300):
     with open(path, encoding="utf-8") as f:
         gpx = gpxpy.parse(f)
 
-    points = [(pt.latitude, pt.longitude, pt.time)
-              for tr in gpx.tracks
-              for seg in tr.segments
-              for pt in seg.points if pt.time]
+    points = [
+        (pt.latitude, pt.longitude, pt.time)
+        for tr in gpx.tracks
+        for seg in tr.segments
+        for pt in seg.points
+        if pt.time
+    ]
     if not points:
         return []
 
     points.sort(key=lambda x: x[2])
-    # Stopps erkennen
-    raw_stops = detect_stops(points, radius, min_duration_sec)
-    # Chronologisch sortieren (sicherheitshalber)
+    # Neue Stop-Erkennung: 20 m, ≥ 3 Min (180 s)
+    raw_stops = detect_stops(points, distance_threshold=20, min_duration_sec=180)
     raw_stops.sort(key=lambda s: s["start_time"])
 
-    # Geocoding + POIs anreichern
     enriched = []
     for stop in raw_stops:
-        stop["address"] = reverse_geocode(stop["latitude"], stop["longitude"])
-        stop["pois"]    = lookup_pois(stop["latitude"], stop["longitude"])
+        addr = reverse_geocode(stop["latitude"], stop["longitude"])
+        pois = lookup_pois(stop["latitude"], stop["longitude"])
+        stop["address"] = addr
+        stop["pois"]    = pois
         enriched.append(stop)
 
     return enriched

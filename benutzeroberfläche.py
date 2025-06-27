@@ -162,7 +162,7 @@ class WegeRadar:
         tk.Frame(self.content_frame, bg="black", height=2).pack(fill="x", pady=(0,10))
 
         if not stops:
-            tk.Label(self.content_frame, text="Keine Aufenthaltsorte ≥5 Min gefunden.",
+            tk.Label(self.content_frame, text="Keine Aufenthaltsorte ≥3 Min. gefunden.",
                      font=("Arial",12), bg="white", anchor="w",
                      wraplength=self.window_width*2).pack(fill="x", padx=20, pady=5)
             return
