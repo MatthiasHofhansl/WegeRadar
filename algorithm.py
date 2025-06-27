@@ -3,26 +3,29 @@ import os
 import tkinter as tk
 from tkinter import messagebox
 import gpxpy
-import requests
+from mapbox import Geocoder, Tilequery
 from math import radians, cos, sin, asin, sqrt
 
-# Photon-API-Endpunkte
-PHOTON_REVERSE_URL = "https://photon.komoot.io/reverse"
-PHOTON_SEARCH_URL  = "https://photon.komoot.io/api/"
+# Deinen Mapbox-Token hier einfügen
+MAPBOX_TOKEN = "pk.eyJ1IjoibWF0dGhpYXNoZmwiLCJhIjoiY21jZjVsbnp5MDVidzJscXYyNGlvYWx2NiJ9.x5gxjRDS5FwuJK09SYna7A"
+
+# Mapbox-Clients
+_geocoder  = Geocoder(access_token=MAPBOX_TOKEN)
+_tilequery = Tilequery(access_token=MAPBOX_TOKEN)
 
 def show_date_dialog(master, gpx_folder, last, first):
     prefix = f"{last}_{first}_"
     files = [f for f in os.listdir(gpx_folder)
              if f.startswith(prefix) and f.lower().endswith('.gpx')]
     if not files:
-        messagebox.showinfo("WegeRadar", f"Keine GPX-Dateien für {last}, {first} gefunden.", parent=master)
+        messagebox.showinfo(
+            "WegeRadar",
+            f"Keine GPX-Dateien für {last}, {first} gefunden.",
+            parent=master
+        )
         return None
 
-    date_map = {}
-    for f in files:
-        date = os.path.splitext(f)[0].split('_')[2] if '_' in f else "Unbekannt"
-        date_map[date] = f
-
+    date_map = {os.path.splitext(f)[0].split('_')[2]: f for f in files}
     if len(date_map) == 1:
         return next(iter(date_map))
 
@@ -31,16 +34,20 @@ def show_date_dialog(master, gpx_folder, last, first):
     dialog.title("GPX-Datei Auswahl")
     dialog.transient(master)
     dialog.grab_set()
-    tk.Label(dialog,
-             text="Mehrere GPX-Dateien gefunden. Wähle bitte ein Datum:",
-             font=("Arial", 12), justify="center", wraplength=300).pack(pady=10)
+    tk.Label(
+        dialog,
+        text="Mehrere GPX-Dateien gefunden. Wähle bitte ein Datum:",
+        font=("Arial", 12),
+        justify="center",
+        wraplength=300
+    ).pack(pady=10)
 
-    def select(d):
+    def choose(d):
         selected["date"] = d
         dialog.destroy()
 
-    for d in sorted(date_map.keys()):
-        tk.Button(dialog, text=d, width=20, command=lambda d=d: select(d)).pack(pady=2)
+    for d in sorted(date_map):
+        tk.Button(dialog, text=d, width=20, command=lambda d=d: choose(d)).pack(pady=2)
 
     dialog.update_idletasks()
     w, h = dialog.winfo_width(), dialog.winfo_height()
@@ -51,69 +58,47 @@ def show_date_dialog(master, gpx_folder, last, first):
     return selected["date"]
 
 def haversine(lat1, lon1, lat2, lon2):
-    """Entfernung in Metern zwischen zwei GPS-Punkten."""
+    """Distanz in Metern zwischen zwei GPS-Koordinaten."""
     lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
-    dlon, dlat = lon2 - lon1, lat2 - lat1
+    dlat, dlon = lat2 - lat1, lon2 - lon1
     a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
     c = 2 * asin(sqrt(a))
     return 6371000 * c
 
 def reverse_geocode(lat, lon):
     """
-    Nutzt Photon für Reverse-Geocoding.
-    Gibt eine lesbare Adresse zurück.
+    Nutzt Mapbox Geocoding API, um eine Adresse zu erhalten.
     """
-    params = {"lat": lat, "lon": lon}
-    r = requests.get(PHOTON_REVERSE_URL, params=params, timeout=10)
-    r.raise_for_status()
-    data = r.json()
-    feats = data.get("features", [])
-    if not feats:
+    resp = _geocoder.reverse(lon=lon, lat=lat, types=['address'], limit=1)
+    resp.raise_for_status()
+    features = resp.json().get("features", [])
+    if not features:
         return "Adresse nicht verfügbar"
-    props = feats[0].get("properties", {})
-    # Baue eine Adresse aus Namen und Straßendaten zusammen
-    parts = []
-    if props.get("name"):
-        parts.append(props["name"])
-    if props.get("street"):
-        parts.append(props["street"])
-    if props.get("city"):
-        parts.append(props["city"])
-    if props.get("country"):
-        parts.append(props["country"])
-    return ", ".join(parts) if parts else "Adresse nicht verfügbar"
+    return features[0]["place_name"]
 
-def lookup_pois(lat, lon, radius=15, limit=50):
+def lookup_pois(lat, lon, radius=15, limit=10):
     """
-    Nutzt Photon, um POIs (amenity) in der Umgebung zu finden.
-    Filtert clientseitig nach dem Radius.
+    Nutzt Mapbox Tilequery API, um POIs in der Umgebung zu finden.
     """
-    params = {
-        "lat": lat,
-        "lon": lon,
-        "limit": limit,
-        "osm_tag": "amenity"
-    }
-    r = requests.get(PHOTON_SEARCH_URL, params=params, timeout=10)
-    r.raise_for_status()
-    data = r.json()
-    feats = data.get("features", [])
-    pois = []
-    for feat in feats:
-        coords = feat["geometry"]["coordinates"]  # [lon, lat]
-        dist = haversine(lat, lon, coords[1], coords[0])
-        if dist <= radius:
-            props = feat.get("properties", {})
-            name = props.get("name") or props.get("osm_value")
-            if name:
-                pois.append(name)
-    # Duplikate entfernen
-    return list(dict.fromkeys(pois))
+    resp = _tilequery.query(
+        lon, lat,
+        radius=radius,
+        limit=limit,
+        layers=['poi_label']
+    )
+    resp.raise_for_status()
+    features = resp.json().get("features", [])
+    pois = [
+        feat["properties"].get("name")
+        for feat in features
+        if feat["properties"].get("name")
+    ]
+    return pois
 
 def analyze_gpx(gpx_folder, last, first, date, radius=15, min_duration_sec=300):
     """
     Parst die GPX-Datei, findet Stopps ≥ min_duration_sec,
-    führt Reverse-Geocoding und POI-Suche mit Photon durch.
+    reverse-geocodet und holt POIs per Mapbox.
     """
     filename = f"{last}_{first}_{date}.gpx"
     path = os.path.join(gpx_folder, filename)
@@ -125,7 +110,10 @@ def analyze_gpx(gpx_folder, last, first, date, radius=15, min_duration_sec=300):
 
     points = [
         (pt.latitude, pt.longitude, pt.time)
-        for tr in gpx.tracks for seg in tr.segments for pt in seg.points if pt.time
+        for tr in gpx.tracks
+        for seg in tr.segments
+        for pt in seg.points
+        if pt.time
     ]
     if not points:
         return []
