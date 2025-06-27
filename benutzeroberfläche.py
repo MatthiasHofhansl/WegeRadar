@@ -240,6 +240,7 @@ class WegeRadar:
         - Überschrift mit kleinem "Teilnehmer(in): Nachname, Vorname"
         - Rotes Kreuz zum Schließen
         - Datum der GPX-Datei
+        - Horizontale Linie unter dem Datum
         """
         # Alte Detail-Inhalte löschen
         for w in self.content_frame.winfo_children():
@@ -271,13 +272,21 @@ class WegeRadar:
         importlib.reload(algorithm)
         date = algorithm.show_date_dialog(self.master, self.gpx_path, last, first)
         if date:
+            # Datum-Label
             tk.Label(
                 self.content_frame,
                 text=f"Datum der GPX-Datei: {date}",
                 font=("Arial", 14),
                 bg="white",
                 anchor="w"
-            ).pack(fill="x", padx=20, pady=(5, 10))
+            ).pack(fill="x", padx=20, pady=(5, 2))
+
+            # Horizontale Trennlinie
+            tk.Frame(
+                self.content_frame,
+                bg="black",
+                height=2
+            ).pack(fill="x", padx=20, pady=(0, 10))
 
 if __name__ == "__main__":
     root = tk.Tk()
