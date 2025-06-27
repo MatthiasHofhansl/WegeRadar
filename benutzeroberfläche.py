@@ -269,12 +269,23 @@ class WegeRadar:
         if not date:
             return
 
-        # Lade-Dialog mit Progressbar
+        # Lade-Dialog mittig zum Hauptfenster
         loader = tk.Toplevel(self.master)
         loader.title("Bitte warten...")
-        loader.geometry("300x80")
+        loader.resizable(False, False)
+        w, h = 300, 80
+        # sicherstellen, dass Hauptfenster-Layout aktuell ist
+        self.master.update_idletasks()
+        mx = self.master.winfo_rootx()
+        my = self.master.winfo_rooty()
+        mw = self.master.winfo_width()
+        mh = self.master.winfo_height()
+        x = mx + (mw - w) // 2
+        y = my + (mh - h) // 2
+        loader.geometry(f"{w}x{h}+{x}+{y}")
         loader.transient(self.master)
         loader.grab_set()
+
         tk.Label(loader, text="Daten werden geladen...", font=("Arial", 12)).pack(pady=10)
         progress = ttk.Progressbar(loader, mode="indeterminate")
         progress.pack(fill="x", padx=20, pady=(0,10))
