@@ -49,7 +49,7 @@ def show_date_dialog(master, gpx_folder, last, first):
     # Frage-Label mittig
     lbl = tk.Label(
         dialog,
-        text="Für welchen Tag möchtest du die GPX-Datei auswerten?",
+        text="Für diese(n) Teilnehmer(in) stehen mehrere GPX-Dateien zur Verfügung. An welchem Tag soll die auszuwählende GPX-Datei aufgezeichnet worden sein?",
         font=("Arial", 12),
         justify="center",
         wraplength=300
