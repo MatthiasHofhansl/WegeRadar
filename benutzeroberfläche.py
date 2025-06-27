@@ -1,6 +1,6 @@
 import os
 import tkinter as tk
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 
 # App-Name
 APP_NAME = "WegeRadar"
@@ -113,6 +113,14 @@ class WegeRadar:
             self.gpx_label_selected.config(text=self.gpx_foldername)
 
     def start_action(self):
+        # Prüfe, ob Excel und GPX ausgewählt sind
+        if not self.excel_filename or not self.gpx_foldername:
+            messagebox.showwarning(
+                APP_NAME,
+                "Um fortzufahren, wähle bitte sowohl eine Excel-Datei/das Wegetagebuch als auch einen Ordner mit den GPX-Dateien aus.",
+                parent=self.master
+            )
+            return
         # Alles entfernen, Hintergrund weiß
         self.master.title(APP_NAME)
         for widget in self.master.winfo_children():
@@ -122,8 +130,7 @@ class WegeRadar:
         try:
             self.master.state('zoomed')  # Windows/Linux
         except:
-            # Alternative Maximierung auf macOS
-            self.master.attributes('-zoomed', True)
+            self.master.attributes('-zoomed', True)  # macOS
 
 if __name__ == "__main__":
     root = tk.Tk()
