@@ -20,7 +20,8 @@ class WegeRadar:
         x = (screen_width - window_width) // 2
         y = (screen_height - window_height) // 2
         master.geometry(f"{window_width}x{window_height}+{x}+{y}")
-        master.resizable(False, False)
+        # Fenster darf jetzt wieder in beide Richtungen skaliert werden
+        master.resizable(True, True)
 
         # Variablen zur Speicherung
         self.excel_path = None
