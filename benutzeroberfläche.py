@@ -49,7 +49,8 @@ class WegeRadar:
             text="Gebe hier den Pfad für deine Excel-Datei/das Wegetagebuch an:",
             font=("Arial", 12)
         )
-        prompt_excel.grid(row=0, column=0, columnspan=2, sticky="w", padx=5, pady=(5, 0))
+        prompt_excel.grid(row=0, column=0, columnspan=2,
+                          sticky="w", padx=5, pady=(5, 0))
         btn_excel = tk.Button(
             frame,
             text="Auswählen",
@@ -64,7 +65,8 @@ class WegeRadar:
             width=20,
             anchor="w"
         )
-        self.excel_label_selected.grid(row=1, column=1, padx=5, pady=(5, 5))
+        self.excel_label_selected.grid(row=1, column=1,
+                                       padx=5, pady=(5, 5))
 
         # GPX-Ordner Auswahl
         prompt_gpx = tk.Label(
@@ -72,7 +74,8 @@ class WegeRadar:
             text="Gebe hier den Pfad für den Ordner mit den GPX-Dateien an:",
             font=("Arial", 12)
         )
-        prompt_gpx.grid(row=2, column=0, columnspan=2, sticky="w", padx=5, pady=(15, 0))
+        prompt_gpx.grid(row=2, column=0, columnspan=2,
+                        sticky="w", padx=5, pady=(15, 0))
         btn_gpx = tk.Button(
             frame,
             text="Auswählen",
@@ -87,14 +90,16 @@ class WegeRadar:
             width=20,
             anchor="w"
         )
-        self.gpx_label_selected.grid(row=3, column=1, padx=5, pady=(5, 5))
+        self.gpx_label_selected.grid(row=3, column=1,
+                                     padx=5, pady=(5, 5))
 
         # Hinweistext über dem Start-Button
         info_start = tk.Label(
             self.master,
             text=(
-                "(Du musst nicht zwingend eine Excel-Datei/ein Wegetagebuch hochladen. "
-                "Das Hochladen eines Ordners mit GPX-Dateien ist allerdings notwendig.)"
+                "(Du musst nicht zwingend eine Excel-Datei/ein Wegetagebuch "
+                "hochladen. Das Hochladen eines Ordners mit GPX-Dateien "
+                "ist allerdings notwendig.)"
             ),
             font=("Arial", 10),
             fg="gray",
@@ -157,8 +162,10 @@ class WegeRadar:
         # Scrollbarer Container für Namen
         container = tk.Frame(self.master, bg="white", width=200)
         container.pack(side="left", fill="y")
-        canvas = tk.Canvas(container, bg="white", width=200, highlightthickness=0)
-        scrollbar = tk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        canvas = tk.Canvas(container, bg="white", width=200,
+                           highlightthickness=0)
+        scrollbar = tk.Scrollbar(container, orient="vertical",
+                                 command=canvas.yview)
         scroll_frame = tk.Frame(canvas, bg="white")
         scroll_frame.bind(
             "<Configure>",
@@ -168,6 +175,28 @@ class WegeRadar:
         canvas.configure(yscrollcommand=scrollbar.set)
         canvas.pack(side="left", fill="y", expand=True)
         scrollbar.pack(side="right", fill="y")
+
+        # Mausrad-Scrollen aktivieren, wenn sich der Zeiger über der Liste befindet
+        def _on_mousewheel(event):
+            # Windows / macOS
+            if hasattr(event, 'delta') and event.delta:
+                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            # Linux (Button-4 = hoch, Button-5 = runter)
+            elif event.num == 4:
+                canvas.yview_scroll(-1, "units")
+            elif event.num == 5:
+                canvas.yview_scroll(1, "units")
+
+        canvas.bind("<Enter>", lambda e: (
+            canvas.bind_all("<MouseWheel>", _on_mousewheel),
+            canvas.bind_all("<Button-4>", _on_mousewheel),
+            canvas.bind_all("<Button-5>", _on_mousewheel)
+        ))
+        canvas.bind("<Leave>", lambda e: (
+            canvas.unbind_all("<MouseWheel>"),
+            canvas.unbind_all("<Button-4>"),
+            canvas.unbind_all("<Button-5>")
+        ))
 
         # Vertikale Trennlinie rechts neben der Box
         separator = tk.Frame(self.master, bg="black", width=2)
@@ -184,7 +213,8 @@ class WegeRadar:
         title.pack(pady=(10, 5))
 
         # Namen aus GPX-Dateien einlesen und sortieren
-        files = [f for f in os.listdir(self.gpx_path) if f.lower().endswith('.gpx')]
+        files = [f for f in os.listdir(self.gpx_path)
+                 if f.lower().endswith('.gpx')]
         names_set = set()
         for f in files:
             base = os.path.splitext(f)[0]
@@ -198,7 +228,8 @@ class WegeRadar:
         max_chars = 20
         for last, first in names:
             full_name = f"{last}, {first}"
-            display_name = (full_name[:max_chars-3] + "...") if len(full_name) > max_chars else full_name
+            display_name = (full_name[:max_chars-3] + "..."
+                            ) if len(full_name) > max_chars else full_name
             lbl = tk.Label(
                 scroll_frame,
                 text=display_name,
@@ -208,9 +239,11 @@ class WegeRadar:
                 width=20
             )
             lbl.pack(fill="x", padx=10, pady=2)
+
             # Hover-Effekt
             lbl.bind("<Enter>", lambda e, l=lbl: l.config(bg="#e0e0e0"))
             lbl.bind("<Leave>", lambda e, l=lbl: l.config(bg="white"))
+
             # Klick-Event: ruft algorithm.py auf
             lbl.bind(
                 "<Button-1>",
@@ -226,7 +259,8 @@ class WegeRadar:
             import algorithm
             importlib.reload(algorithm)
         except ImportError:
-            messagebox.showerror(APP_NAME, "Die Datei 'algorithm.py' wurde nicht gefunden.")
+            messagebox.showerror(APP_NAME,
+                                 "Die Datei 'algorithm.py' wurde nicht gefunden.")
 
 if __name__ == "__main__":
     root = tk.Tk()
