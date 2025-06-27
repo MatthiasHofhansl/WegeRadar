@@ -5,7 +5,7 @@ from tkinter import filedialog, messagebox
 # App-Name
 APP_NAME = "WegeRadar"
 
-class PathSelectorApp:
+class WegeRadar:
     def __init__(self, master):
         self.master = master
         master.title(APP_NAME)
@@ -107,10 +107,7 @@ class PathSelectorApp:
             self.gpx_label_selected.config(text=self.gpx_foldername)
 
 
-def main():
-    root = tk.Tk()
-    app = PathSelectorApp(root)
-    root.mainloop()
-
 if __name__ == "__main__":
-    main()
+    root = tk.Tk()
+    app = WegeRadar(root)
+    root.mainloop()
