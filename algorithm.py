@@ -6,10 +6,9 @@ from tkinter import messagebox
 import gpxpy
 import requests
 from math import radians, cos, sin, asin, sqrt
-from concurrent.futures import ThreadPoolExecutor
 import time
 
-# Nominatim (OpenStreetMap) für Reverse-Geocoding
+# OpenStreetMap Nominatim für Reverse-Geocoding
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
 USER_AGENT = "WegeRadarApp/1.0 (your_email@example.com)"
 
@@ -20,12 +19,13 @@ OVERPASS_SERVERS = [
     "https://lz4.overpass-api.de/api/interpreter"
 ]
 
+# Session für Connection-Pooling und User-Agent
 _session = requests.Session()
 _session.headers.update({"User-Agent": USER_AGENT})
 
-# Caches
+# Caches für Geocoding und POIs
 _reverse_cache = {}
-_pois_cache    = {}
+_pois_cache = {}
 _fastest_overpass = None
 
 def _choose_overpass_url():
@@ -44,10 +44,7 @@ def _choose_overpass_url():
         except Exception:
             continue
 
-    if timings:
-        _fastest_overpass = min(timings, key=timings.get)
-    else:
-        _fastest_overpass = OVERPASS_SERVERS[0]
+    _fastest_overpass = min(timings, key=timings.get) if timings else OVERPASS_SERVERS[0]
     return _fastest_overpass
 
 def show_date_dialog(master, gpx_folder, last, first):
@@ -55,9 +52,11 @@ def show_date_dialog(master, gpx_folder, last, first):
     files = [f for f in os.listdir(gpx_folder)
              if f.startswith(prefix) and f.lower().endswith('.gpx')]
     if not files:
-        messagebox.showinfo("WegeRadar",
-                            f"Keine GPX-Dateien für {last}, {first} gefunden.",
-                            parent=master)
+        messagebox.showinfo(
+            "WegeRadar",
+            f"Keine GPX-Dateien für {last}, {first} gefunden.",
+            parent=master
+        )
         return None
 
     date_map = {os.path.splitext(f)[0].split('_')[2]: f for f in files}
@@ -69,11 +68,13 @@ def show_date_dialog(master, gpx_folder, last, first):
     dlg.title("GPX-Datei Auswahl")
     dlg.transient(master)
     dlg.grab_set()
-    tk.Label(dlg,
-             text="Mehrere GPX-Dateien gefunden. Wähle bitte ein Datum:",
-             font=("Arial", 12),
-             justify="center",
-             wraplength=300).pack(pady=10)
+    tk.Label(
+        dlg,
+        text="Mehrere GPX-Dateien gefunden. Wähle bitte ein Datum:",
+        font=("Arial", 12),
+        justify="center",
+        wraplength=300
+    ).pack(pady=10)
 
     def choose(d):
         selected["date"] = d
@@ -91,32 +92,50 @@ def show_date_dialog(master, gpx_folder, last, first):
     return selected["date"]
 
 def haversine(lat1, lon1, lat2, lon2):
+    """Entfernung in Metern zwischen zwei GPS-Punkten."""
     lat1, lon1, lat2, lon2 = map(radians, (lat1, lon1, lat2, lon2))
     dlat, dlon = lat2 - lat1, lon2 - lon1
     a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
     return 6371000 * 2 * asin(sqrt(a))
 
 def reverse_geocode(lat, lon):
+    """
+    Nutzt Nominatim (OpenStreetMap) für Reverse-Geocoding mit Cache
+    und honoriert die 1 Request/s-Regel durch sleep.
+    """
     key = (round(lat, 5), round(lon, 5))
     if key in _reverse_cache:
         return _reverse_cache[key]
 
-    params = {"lat": lat, "lon": lon, "format": "jsonv2", "zoom": 18, "addressdetails": 1}
+    params = {
+        "lat": lat,
+        "lon": lon,
+        "format": "jsonv2",
+        "zoom": 18,
+        "addressdetails": 1
+    }
     r = _session.get(NOMINATIM_URL, params=params, timeout=10)
     r.raise_for_status()
     data = r.json()
     addr = data.get("display_name", "Adresse nicht verfügbar")
 
+    # Rate-Limit respektieren
+    time.sleep(1)
+
     _reverse_cache[key] = addr
     return addr
 
 def lookup_pois(lat, lon, radius=15):
+    """
+    Nutzt Overpass für POI-Suche mit Cache, parallel-freundlich und
+    mit sleep, um Warteschlangen zu vermeiden.
+    """
     key = (round(lat, 5), round(lon, 5), radius)
     if key in _pois_cache:
         return _pois_cache[key]
 
     overpass_url = _choose_overpass_url()
-    q = f"""
+    query = f"""
 [out:json][timeout:25];
 (
   node(around:{radius},{lat},{lon})[amenity];
@@ -124,26 +143,29 @@ def lookup_pois(lat, lon, radius=15):
 );
 out center;
 """
-    r = _session.post(overpass_url, data={"data": q}, timeout=30)
+    r = _session.post(overpass_url, data={"data": query}, timeout=30)
     r.raise_for_status()
-    elems = r.json().get("elements", [])
+    elements = r.json().get("elements", [])
 
     pois = []
-    for el in elems:
+    for el in elements:
         name = el.get("tags", {}).get("name")
         if name:
             pois.append(name)
     pois = list(dict.fromkeys(pois))
 
+    # Rate-Limit respektieren
+    time.sleep(1)
+
     _pois_cache[key] = pois
     return pois
 
-def _process_stop(stop):
-    stop["address"] = reverse_geocode(stop["latitude"], stop["longitude"])
-    stop["pois"]    = lookup_pois(stop["latitude"], stop["longitude"])
-    return stop
-
 def analyze_gpx(gpx_folder, last, first, date, radius=15, min_duration_sec=300):
+    """
+    Parst die GPX-Datei, findet Stopps ≥ min_duration_sec,
+    und ruft reverse_geocode und lookup_pois sequenziell auf,
+    um Rate-Limits einzuhalten.
+    """
     filename = f"{last}_{first}_{date}.gpx"
     path = os.path.join(gpx_folder, filename)
     if not os.path.exists(path):
@@ -152,17 +174,21 @@ def analyze_gpx(gpx_folder, last, first, date, radius=15, min_duration_sec=300):
     with open(path, encoding="utf-8") as f:
         gpx = gpxpy.parse(f)
 
-    points = [(pt.latitude, pt.longitude, pt.time)
-              for tr in gpx.tracks
-              for seg in tr.segments
-              for pt in seg.points
-              if pt.time]
+    points = [
+        (pt.latitude, pt.longitude, pt.time)
+        for tr in gpx.tracks
+        for seg in tr.segments
+        for pt in seg.points
+        if pt.time
+    ]
     if not points:
         return []
 
     points.sort(key=lambda x: x[2])
-    raw = []
-    i, n = 0, len(points)
+
+    raw_stops = []
+    i = 0
+    n = len(points)
     while i < n:
         lat0, lon0, t0 = points[i]
         j = i + 1
@@ -173,7 +199,7 @@ def analyze_gpx(gpx_folder, last, first, date, radius=15, min_duration_sec=300):
             seg = points[i:j]
             mid_lat = sum(p[0] for p in seg) / len(seg)
             mid_lon = sum(p[1] for p in seg) / len(seg)
-            raw.append({
+            raw_stops.append({
                 "start_time": t0,
                 "end_time": points[j-1][2],
                 "duration_seconds": dur,
@@ -184,7 +210,13 @@ def analyze_gpx(gpx_folder, last, first, date, radius=15, min_duration_sec=300):
         else:
             i += 1
 
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        stops = list(executor.map(_process_stop, raw))
+    # Jetzt sequenziell Anfragen stellen
+    stops = []
+    for entry in raw_stops:
+        addr = reverse_geocode(entry["latitude"], entry["longitude"])
+        pois = lookup_pois(entry["latitude"], entry["longitude"], radius)
+        entry["address"] = addr
+        entry["pois"] = pois
+        stops.append(entry)
 
     return stops
