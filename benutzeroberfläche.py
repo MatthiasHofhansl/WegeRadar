@@ -21,10 +21,10 @@ class WegeRadar:
         master.resizable(False, False)
 
         # Variablen zur Speicherung
-        self.excel_filename = None
         self.excel_path = None
-        self.gpx_foldername = None
+        self.excel_filename = None
         self.gpx_path = None
+        self.gpx_foldername = None
 
         self.setup_ui()
 
@@ -87,7 +87,7 @@ class WegeRadar:
         )
         self.gpx_label_selected.grid(row=3, column=1, padx=5, pady=(5, 5))
 
-        # Start-Button bündig am unteren Fensterrand ohne Padding
+        # Start-Button bündig am unteren Fensterrand
         start_btn = tk.Button(
             self.master,
             text="Start",
@@ -117,7 +117,7 @@ class WegeRadar:
             self.gpx_label_selected.config(text=self.gpx_foldername)
 
     def start_action(self):
-        # Prüfe, ob Excel und GPX ausgewählt sind
+        # Prüfe Auswahl
         if not self.excel_path or not self.gpx_path:
             messagebox.showwarning(
                 APP_NAME,
@@ -125,36 +125,36 @@ class WegeRadar:
                 parent=self.master
             )
             return
-        # Alles entfernen, Hintergrund weiß
+        # Leere Fenster und Hintergrund
         self.master.title(APP_NAME)
         for widget in self.master.winfo_children():
             widget.destroy()
         self.master.configure(background="white")
-        # Fenster maximieren (mit Titel-Leiste weiterhin sichtbar)
         try:
-            self.master.state('zoomed')  # Windows/Linux
+            self.master.state('zoomed')
         except:
-            self.master.attributes('-zoomed', True)  # macOS
+            self.master.attributes('-zoomed', True)
 
-        # Scrollbarer Container für Teilnehmerliste
+        # Scrollbarer Container
         container = tk.Frame(self.master, bg="white", width=200)
         container.pack(side="left", fill="y")
         canvas = tk.Canvas(container, bg="white", width=200, highlightthickness=0)
         scrollbar = tk.Scrollbar(container, orient="vertical", command=canvas.yview)
         scroll_frame = tk.Frame(canvas, bg="white")
         scroll_frame.bind(
-            "<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
-        canvas.create_window((0,0), window=scroll_frame, anchor="nw")
+        canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
         canvas.pack(side="left", fill="y", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # Vertikale Trennlinie rechts neben der Box
+        # Trennlinie
         separator = tk.Frame(self.master, bg="black", width=2)
         separator.pack(side="left", fill="y")
 
-        # Titel in Box mit Umbruch
+        # Titel
         title = tk.Label(
             scroll_frame,
             text="Teilnehmerinnen\nund Teilnehmer",
@@ -164,26 +164,22 @@ class WegeRadar:
         )
         title.pack(pady=(10, 5))
 
-        # Dateien aus Ordner auslesen und Namen sortieren
+        # Namen einlesen und sortieren
         files = [f for f in os.listdir(self.gpx_path) if f.lower().endswith('.gpx')]
         names_set = set()
         for f in files:
             base = os.path.splitext(f)[0]
             parts = base.split('_')
             if len(parts) >= 2:
-                last = parts[0]
-                first = parts[1]
+                last, first = parts[0], parts[1]
                 names_set.add((last, first))
         names = sorted(names_set, key=lambda x: x[0])
 
-        # Anzeige mit automatischem Abschneiden
+        # Anzeige mit Abschneiden und Hover
         max_chars = 20
         for last, first in names:
             full_name = f"{last}, {first}"
-            if len(full_name) > max_chars:
-                display_name = full_name[:max_chars-3] + "..."
-            else:
-                display_name = full_name
+            display_name = (full_name[:max_chars-3] + "...") if len(full_name) > max_chars else full_name
             lbl = tk.Label(
                 scroll_frame,
                 text=display_name,
@@ -193,6 +189,8 @@ class WegeRadar:
                 width=20
             )
             lbl.pack(fill="x", padx=10, pady=2)
+            lbl.bind("<Enter>", lambda e, l=lbl: l.config(bg="#e0e0e0"))
+            lbl.bind("<Leave>", lambda e, l=lbl: l.config(bg="white"))
 
 if __name__ == "__main__":
     root = tk.Tk()
