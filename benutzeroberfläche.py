@@ -26,6 +26,7 @@ class WegeRadar:
         self.gpx_path = None
         self.gpx_foldername = None
 
+        self.window_width = window_width
         self.setup_ui()
 
     def setup_ui(self):
@@ -87,6 +88,17 @@ class WegeRadar:
         )
         self.gpx_label_selected.grid(row=3, column=1, padx=5, pady=(5, 5))
 
+        # Hinweis unter Pfadauswahl
+        info_start = tk.Label(
+            self.master,
+            text="(Du musst nicht zwingend eine Excel-Datei/ein Wegetagebuch hochladen. Das Hochladen eines Ordners mit GPX-Dateien ist allerdings notwendig.)",
+            font=("Arial", 10),
+            fg="gray",
+            wraplength=self.window_width - 40,
+            justify="center"
+        )
+        info_start.pack(fill="x", padx=20, pady=(0, 5))
+
         # Start-Button bündig am unteren Fensterrand
         start_btn = tk.Button(
             self.master,
@@ -117,11 +129,11 @@ class WegeRadar:
             self.gpx_label_selected.config(text=self.gpx_foldername)
 
     def start_action(self):
-        # Prüfe Auswahl
-        if not self.excel_path or not self.gpx_path:
+        # Prüfe, ob GPX-Ordner ausgewählt wurde
+        if not self.gpx_path:
             messagebox.showwarning(
                 APP_NAME,
-                "Um fortzufahren, wähle bitte sowohl eine Excel-Datei als auch einen Ordner mit den GPX-Dateien aus.",
+                "Um fortzufahren, wähle bitte einen Ordner mit den GPX-Dateien aus.",
                 parent=self.master
             )
             return
@@ -131,11 +143,11 @@ class WegeRadar:
             widget.destroy()
         self.master.configure(background="white")
         try:
-            self.master.state('zoomed')
+            self.master.state('zoomed')  # Windows/Linux
         except:
-            self.master.attributes('-zoomed', True)
+            self.master.attributes('-zoomed', True)  # macOS
 
-        # Scrollbarer Container
+        # Scrollbarer Container für Teilnehmerliste
         container = tk.Frame(self.master, bg="white", width=200)
         container.pack(side="left", fill="y")
         canvas = tk.Canvas(container, bg="white", width=200, highlightthickness=0)
