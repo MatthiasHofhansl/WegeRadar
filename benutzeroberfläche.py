@@ -11,10 +11,12 @@ class WegeRadar:
         master.title(APP_NAME)
 
         # Fenstergröße und Zentrierung
-        window_width = master.winfo_screenwidth()
-        window_height = master.winfo_screenheight()
-        x = 0
-        y = 0
+        window_width = 500
+        window_height = 600
+        screen_width = master.winfo_screenwidth()
+        screen_height = master.winfo_screenheight()
+        x = (screen_width - window_width) // 2
+        y = (screen_height - window_height) // 2
         master.geometry(f"{window_width}x{window_height}+{x}+{y}")
         master.resizable(False, False)
 
@@ -48,7 +50,6 @@ class WegeRadar:
             frame,
             text="Auswählen",
             command=self.select_excel,
-            font=("Arial", 24, "bold"),
             width=12
         )
         btn_excel.grid(row=1, column=0, padx=5, pady=(5, 5))
@@ -72,7 +73,6 @@ class WegeRadar:
             frame,
             text="Auswählen",
             command=self.select_gpx,
-            font=("Arial", 24, "bold"),
             width=12
         )
         btn_gpx.grid(row=3, column=0, padx=5, pady=(5, 5))
@@ -85,12 +85,11 @@ class WegeRadar:
         )
         self.gpx_label_selected.grid(row=3, column=1, padx=5, pady=(5, 5))
 
-        # Start-Button ganz unten, füllt Breite
+        # Start-Button am unteren Fensterrand
         start_btn = tk.Button(
             self.master,
             text="Start",
             command=self.start_action,
-            font=("Arial", 24, "bold"),
             height=1
         )
         start_btn.pack(side="bottom", fill="x")
@@ -117,19 +116,9 @@ class WegeRadar:
             self.gpx_label_selected.config(text=self.gpx_foldername)
 
     def start_action(self):
-        # Fenster in Vollbild umwandeln und leeren
-        self.master.title(APP_NAME)
-        self.master.configure(background="white")
-        for widget in self.master.winfo_children():
-            widget.destroy()
-        # Setze Vollbild
-        try:
-            self.master.attributes('-fullscreen', True)
-        except:
-            # Alternative Maximierung
-            w = self.master.winfo_screenwidth()
-            h = self.master.winfo_screenheight()
-            self.master.geometry(f"{w}x{h}+0+0")
+        # Platzhalter für Start-Aktion
+        messagebox.showinfo(APP_NAME, "Start wurde gedrückt!")
+
 
 if __name__ == "__main__":
     root = tk.Tk()
