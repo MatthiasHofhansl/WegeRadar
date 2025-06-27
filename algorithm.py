@@ -22,8 +22,7 @@ def show_date_dialog(master, gpx_folder, last, first):
         return None
     date_map = {}
     for f in files:
-        parts = os.path.splitext(f)[0].split('_')
-        date = parts[2] if len(parts) >= 3 else "Unbekannt"
+        date = os.path.splitext(f)[0].split('_')[2] if '_' in f else "Unbekannt"
         date_map[date] = f
     if len(date_map) == 1:
         return next(iter(date_map))
@@ -32,13 +31,9 @@ def show_date_dialog(master, gpx_folder, last, first):
     dialog.title("GPX-Datei Auswahl")
     dialog.transient(master)
     dialog.grab_set()
-    tk.Label(
-        dialog,
-        text="Mehrere GPX-Dateien gefunden. Wähle bitte ein Datum:",
-        font=("Arial", 12),
-        justify="center",
-        wraplength=300
-    ).pack(pady=10)
+    tk.Label(dialog,
+             text="Mehrere GPX-Dateien gefunden. Wähle bitte ein Datum:",
+             font=("Arial", 12), justify="center", wraplength=300).pack(pady=10)
     def select(d):
         selected["date"] = d
         dialog.destroy()
@@ -56,9 +51,9 @@ def show_date_dialog(master, gpx_folder, last, first):
 def haversine(lat1, lon1, lat2, lon2):
     lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
     dlon, dlat = lon2 - lon1, lat2 - lat1
-    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+    a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
     c = 2 * asin(sqrt(a))
-    return 6371000 * c  # Entfernung in Metern
+    return 6371000 * c  # Meter
 
 
 def reverse_geocode(lat, lon):
@@ -86,35 +81,18 @@ out center;
 
 
 def analyze_gpx(gpx_folder, last, first, date, radius=15, min_duration_sec=300):
-    """
-    Lädt die GPX-Datei, erkennt Stopps ≥ min_duration_sec im radius (m),
-    erfasst zusätzlich Pausen als Aufenthaltsorte und
-    führt Reverse-Geocoding und POI-Suche durch.
-    """
     filename = f"{last}_{first}_{date}.gpx"
     path = os.path.join(gpx_folder, filename)
     if not os.path.exists(path):
         return []
-    # GPX parsen
     with open(path, "r", encoding="utf-8") as f:
         gpx = gpxpy.parse(f)
-    # Trackpunkte sammeln
-    points = [
-        (pt.latitude, pt.longitude, pt.time)
-        for tr in gpx.tracks
-        for seg in tr.segments
-        for pt in seg.points
-        if pt.time
-    ]
+    points = [(pt.latitude, pt.longitude, pt.time)
+              for tr in gpx.tracks for seg in tr.segments for pt in seg.points if pt.time]
     if not points:
         return []
     points.sort(key=lambda x: x[2])
-
-    stops = []
-    n = len(points)
-
-    # 1) Klassische Stopperkennung: Gruppe von Punkten im Radius über Dauer
-    i = 0
+    stops, i, n = [], 0, len(points)
     while i < n:
         lat0, lon0, t0 = points[i]
         j = i + 1
@@ -139,26 +117,4 @@ def analyze_gpx(gpx_folder, last, first, date, radius=15, min_duration_sec=300):
             i = j
         else:
             i += 1
-
-    # 2) Pausen-Erkennung: große Zeitlücken zwischen zwei Punkten
-    for k in range(1, n):
-        t_prev = points[k-1][2]
-        t_curr = points[k][2]
-        gap = (t_curr - t_prev).total_seconds()
-        if gap >= min_duration_sec:
-            lat, lon = points[k-1][0], points[k-1][1]
-            addr = reverse_geocode(lat, lon)
-            pois = lookup_pois(lat, lon, radius)
-            stops.append({
-                "start_time": t_prev,
-                "end_time": t_curr,
-                "duration_seconds": gap,
-                "latitude": lat,
-                "longitude": lon,
-                "address": addr,
-                "pois": pois
-            })
-
-    # Sortiere alle Stops chronologisch
-    stops.sort(key=lambda x: x["start_time"])
     return stops
