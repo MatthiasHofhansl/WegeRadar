@@ -239,8 +239,8 @@ class WegeRadar:
         Zeigt rechts von der Liste:
         - Überschrift mit kleinem "Teilnehmer(in): Nachname, Vorname"
         - Rotes Kreuz zum Schließen
-        - Datum der GPX-Datei
-        - Horizontale Linie unter dem Datum
+        - Fettgedrucktes Datum der GPX-Datei
+        - Horizontale Linie unter dem Datum, die bis zum Fensterrand reicht
         """
         # Alte Detail-Inhalte löschen
         for w in self.content_frame.winfo_children():
@@ -254,7 +254,7 @@ class WegeRadar:
             bg="white",
             anchor="w"
         )
-        header.pack(fill="x", padx=20, pady=(20, 5))
+        header.pack(fill="x", padx=20, pady=(10, 5))
 
         # Close-Kreuz oben rechts
         close_btn = tk.Button(
@@ -272,14 +272,14 @@ class WegeRadar:
         importlib.reload(algorithm)
         date = algorithm.show_date_dialog(self.master, self.gpx_path, last, first)
         if date:
-            # Datum-Label
+            # Datum-Label fett
             tk.Label(
                 self.content_frame,
                 text=f"Datum der GPX-Datei: {date}",
-                font=("Arial", 14),
+                font=("Arial", 14, "bold"),
                 bg="white",
                 anchor="w"
-            ).pack(fill="x", padx=20, pady=(5, 2))
+            ).pack(fill="x", padx=0, pady=(5, 2))
 
             # Horizontale Trennlinie (ohne Seitenabstand)
             tk.Frame(
