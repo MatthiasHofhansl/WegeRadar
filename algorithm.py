@@ -116,8 +116,7 @@ def reverse_geocode(lat, lon):
     }
     r = _session.get(NOMINATIM_URL, params=params, timeout=10)
     r.raise_for_status()
-    data = r.json()
-    addr = data.get("display_name", "Adresse nicht verfügbar")
+    addr = r.json().get("display_name", "Adresse nicht verfügbar")
 
     # Rate-Limit respektieren
     time.sleep(1)
@@ -127,8 +126,8 @@ def reverse_geocode(lat, lon):
 
 def lookup_pois(lat, lon, radius=15):
     """
-    Nutzt Overpass für POI-Suche mit Cache, parallel-freundlich und
-    mit sleep, um Warteschlangen zu vermeiden.
+    Nutzt Overpass für POI-Suche mit Cache und sleep,
+    um Warteschlangen zu vermeiden.
     """
     key = (round(lat, 5), round(lon, 5), radius)
     if key in _pois_cache:
@@ -163,8 +162,8 @@ out center;
 def analyze_gpx(gpx_folder, last, first, date, radius=15, min_duration_sec=300):
     """
     Parst die GPX-Datei, findet Stopps ≥ min_duration_sec,
-    und ruft reverse_geocode und lookup_pois sequenziell auf,
-    um Rate-Limits einzuhalten.
+    erkennt zusätzlich pausenbedingte Lücken als Stopps,
+    und ruft reverse_geocode & lookup_pois sequenziell auf.
     """
     filename = f"{last}_{first}_{date}.gpx"
     path = os.path.join(gpx_folder, filename)
@@ -174,21 +173,19 @@ def analyze_gpx(gpx_folder, last, first, date, radius=15, min_duration_sec=300):
     with open(path, encoding="utf-8") as f:
         gpx = gpxpy.parse(f)
 
-    points = [
-        (pt.latitude, pt.longitude, pt.time)
-        for tr in gpx.tracks
-        for seg in tr.segments
-        for pt in seg.points
-        if pt.time
-    ]
+    points = [(pt.latitude, pt.longitude, pt.time)
+              for tr in gpx.tracks
+              for seg in tr.segments
+              for pt in seg.points
+              if pt.time]
     if not points:
         return []
 
     points.sort(key=lambda x: x[2])
 
+    # 1.) Stops basierend auf räumlicher Nähe
     raw_stops = []
-    i = 0
-    n = len(points)
+    i, n = 0, len(points)
     while i < n:
         lat0, lon0, t0 = points[i]
         j = i + 1
@@ -210,13 +207,33 @@ def analyze_gpx(gpx_folder, last, first, date, radius=15, min_duration_sec=300):
         else:
             i += 1
 
-    # Jetzt sequenziell Anfragen stellen
+    # 2.) Pausen in Aufzeichnung als Stopps erkennen
+    pause_stops = []
+    for k in range(len(points) - 1):
+        lat_k, lon_k, t_k = points[k]
+        lat_n, lon_n, t_n = points[k+1]
+        gap = (t_n - t_k).total_seconds()
+        if gap >= min_duration_sec and haversine(lat_k, lon_k, lat_n, lon_n) <= radius:
+            pause_stops.append({
+                "start_time": t_k,
+                "end_time": t_n,
+                "duration_seconds": gap,
+                "latitude": (lat_k + lat_n) / 2,
+                "longitude": (lon_k + lon_n) / 2
+            })
+
+    # 3.) Vereinen und duplizieren entfernen
+    combined = {}
+    for stop in raw_stops + pause_stops:
+        key = (stop["start_time"], stop["end_time"])
+        combined[key] = stop
+    unique_stops = sorted(combined.values(), key=lambda s: s["start_time"])
+
+    # 4.) Reverse-Geocode und POIs sequenziell holen
     stops = []
-    for entry in raw_stops:
-        addr = reverse_geocode(entry["latitude"], entry["longitude"])
-        pois = lookup_pois(entry["latitude"], entry["longitude"], radius)
-        entry["address"] = addr
-        entry["pois"] = pois
+    for entry in unique_stops:
+        entry["address"] = reverse_geocode(entry["latitude"], entry["longitude"])
+        entry["pois"]    = lookup_pois(entry["latitude"], entry["longitude"])
         stops.append(entry)
 
     return stops
