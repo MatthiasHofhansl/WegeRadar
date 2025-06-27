@@ -42,7 +42,7 @@ def show_date_dialog(master, gpx_folder, last, first):
 
     # Dialogfenster für die Datumsauswahl
     dialog = tk.Toplevel(master)
-    dialog.title("GPX-Auswahl")
+    dialog.title("GPX-Datei Auswahl")
     dialog.transient(master)
     dialog.grab_set()
 
