@@ -1,3 +1,4 @@
+# app.py
 import tkinter as tk
 from benutzeroberfläche import WegeRadar
 

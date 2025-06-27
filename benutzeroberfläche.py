@@ -1,3 +1,4 @@
+# benutzeroberfläche.py
 import os
 import threading
 import tkinter as tk
@@ -146,15 +147,16 @@ class WegeRadar:
         progress.start()
 
         def run_analysis():
-            stops = algorithm.analyze_gpx(self.gpx_path, last, first, date)
-            self.master.after(0, lambda: self.show_stops(loader, progress, date, stops))
+            stops, zero_locs = algorithm.analyze_gpx(self.gpx_path, last, first, date)
+            self.master.after(0, lambda: self.show_results(loader, progress, date, stops, zero_locs))
 
         threading.Thread(target=run_analysis, daemon=True).start()
 
-    def show_stops(self, loader, progress, date, stops):
+    def show_results(self, loader, progress, date, stops, zero_locs):
         progress.stop()
         loader.destroy()
 
+        # Stopp-Anzeige
         tk.Label(self.content_frame,
                  text=f"Datum der GPX-Datei: {date}",
                  font=("Arial",14,"bold"), bg="white", anchor="w")\
@@ -165,25 +167,43 @@ class WegeRadar:
             tk.Label(self.content_frame, text="Keine Aufenthaltsorte ≥3 Min. gefunden.",
                      font=("Arial",12), bg="white", anchor="w",
                      wraplength=self.window_width*2).pack(fill="x", padx=20, pady=5)
-            return
+        else:
+            for stop in stops:
+                frame = tk.Frame(self.content_frame, bg="white")
+                frame.pack(fill="x", padx=20, pady=5)
 
-        for stop in stops:
-            frame = tk.Frame(self.content_frame, bg="white")
-            frame.pack(fill="x", padx=20, pady=5)
+                start = stop["start_time"].strftime("%H:%M")
+                end   = stop["end_time"].strftime("%H:%M")
+                addr  = stop.get("address", "Unbekannte Adresse")
+                mins  = int(stop["duration_seconds"] / 60)
 
-            start = stop["start_time"].strftime("%H:%M")
-            end   = stop["end_time"].strftime("%H:%M")
-            addr  = stop.get("address", "Unbekannte Adresse")
-            mins  = int(stop["duration_seconds"] / 60)
+                tk.Label(frame,
+                         text=f"[{start}–{end}] {addr} – {mins} Min.",
+                         font=("Arial",12), bg="white", anchor="w",
+                         wraplength=self.window_width*2)\
+                    .pack(fill="x")
+                pois = stop.get("pois", [])
+                if pois:
+                    tk.Label(frame, text="POIs: " + ", ".join(pois),
+                             font=("Arial",10,"italic"), bg="white",
+                             anchor="w", wraplength=self.window_width*2)\
+                        .pack(fill="x", padx=(10,0), pady=(2,0))
 
-            tk.Label(frame,
-                     text=f"[{start}–{end}] {addr} – {mins} Min.",
+        # Null-Geschwindigkeit: georeferenzierte Orte
+        tk.Frame(self.content_frame, bg="black", height=2).pack(fill="x", pady=(10,10))
+        tk.Label(self.content_frame, text="Orte mit Geschwindigkeit = 0:",
+                 font=("Arial",14,"bold"), bg="white", anchor="w")\
+            .pack(fill="x", padx=20, pady=(0,5))
+        if not zero_locs:
+            tk.Label(self.content_frame, text="Keine Punkte mit Geschwindigkeit 0 gefunden.",
                      font=("Arial",12), bg="white", anchor="w",
-                     wraplength=self.window_width*2)\
-                .pack(fill="x")
-            pois = stop.get("pois", [])
-            if pois:
-                tk.Label(frame, text="POIs: " + ", ".join(pois),
-                         font=("Arial",10,"italic"), bg="white",
-                         anchor="w", wraplength=self.window_width*2)\
-                    .pack(fill="x", padx=(10,0), pady=(2,0))
+                     wraplength=self.window_width*2).pack(fill="x", padx=20, pady=5)
+        else:
+            for loc in zero_locs:
+                addr = loc.get("address", "Adresse nicht verfügbar")
+                lat, lon = loc["latitude"], loc["longitude"]
+                tk.Label(self.content_frame,
+                         text=f"{addr}  ({lat:.5f}, {lon:.5f})",
+                         font=("Arial",12), bg="white", anchor="w",
+                         wraplength=self.window_width*2)\
+                    .pack(fill="x", padx=20, pady=2)

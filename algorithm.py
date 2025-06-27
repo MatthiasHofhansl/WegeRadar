@@ -1,3 +1,4 @@
+# algorithm.py
 import os
 import tkinter as tk
 from tkinter import messagebox
@@ -190,19 +191,43 @@ def detect_stops(points, distance_threshold=20, min_duration_sec=180):
 
     return stops
 
-def analyze_gpx(gpx_folder, last, first, date, radius=15, min_duration_sec=300):
+def cluster_points(points, radius=20):
     """
-    Parst die GPX-Datei, erkennt Stopps mittels detect_stops(),
-    und reichert die Ergebnisse mit Adresse und POIs an.
+    Einfache, greedy Clusterung von Punkten:
+    Punkte im Umkreis `radius` Meter werden zu einem Cluster zusammengefasst.
+    Rückgabe: Liste von Cluster-Zentroiden [(lat, lon), ...]
+    """
+    clusters = []
+    for lat, lon in points:
+        placed = False
+        for c in clusters:
+            clat, clon, cnt = c["lat"], c["lon"], c["count"]
+            if haversine(lat, lon, clat, clon) <= radius:
+                # neuen Durchschnitt berechnen
+                new_cnt = cnt + 1
+                c["lat"] = (clat*cnt + lat)/new_cnt
+                c["lon"] = (clon*cnt + lon)/new_cnt
+                c["count"] = new_cnt
+                placed = True
+                break
+        if not placed:
+            clusters.append({"lat": lat, "lon": lon, "count": 1})
+    return [(c["lat"], c["lon"]) for c in clusters]
+
+def analyze_gpx(gpx_folder, last, first, date, poi_radius=15, min_duration_sec=300):
+    """
+    Parst die GPX-Datei, erkennt Stopps und Null-Geschwindigkeits-Orte (georeferenziert).
     """
     filename = f"{last}_{first}_{date}.gpx"
     path = os.path.join(gpx_folder, filename)
     if not os.path.exists(path):
-        return []
+        return [], []
 
+    # GPX einlesen
     with open(path, encoding="utf-8") as f:
         gpx = gpxpy.parse(f)
 
+    # Rohpunkte sammeln
     points = [
         (pt.latitude, pt.longitude, pt.time)
         for tr in gpx.tracks
@@ -211,19 +236,36 @@ def analyze_gpx(gpx_folder, last, first, date, radius=15, min_duration_sec=300):
         if pt.time
     ]
     if not points:
-        return []
+        return [], []
 
+    # sortieren nach Zeit
     points.sort(key=lambda x: x[2])
-    # Neue Stop-Erkennung: 20 m, ≥ 3 Min (180 s)
-    raw_stops = detect_stops(points, distance_threshold=20, min_duration_sec=180)
-    raw_stops.sort(key=lambda s: s["start_time"])
 
-    enriched = []
+    # Geschwindigkeiten berechnen (m/s → km/h)
+    speeds = [0.0]
+    for (lat1, lon1, t1), (lat2, lon2, t2) in zip(points, points[1:]):
+        dist_m = haversine(lat1, lon1, lat2, lon2)
+        dt_s = (t2 - t1).total_seconds() or 1.0
+        v_kmh = (dist_m / dt_s) * 3.6
+        speeds.append(v_kmh)
+
+    # Stopps erkennen
+    raw_stops = detect_stops(points, distance_threshold=20, min_duration_sec=min_duration_sec)
+    raw_stops.sort(key=lambda s: s["start_time"])
+    enriched_stops = []
     for stop in raw_stops:
         addr = reverse_geocode(stop["latitude"], stop["longitude"])
-        pois = lookup_pois(stop["latitude"], stop["longitude"])
+        pois = lookup_pois(stop["latitude"], stop["longitude"], radius=poi_radius)
         stop["address"] = addr
-        stop["pois"]    = pois
-        enriched.append(stop)
+        stop["pois"] = pois
+        enriched_stops.append(stop)
 
-    return enriched
+    # Null-Geschwindigkeitspunkte sammeln und clustern
+    zero_points = [(lat, lon) for (lat, lon, _), v in zip(points, speeds) if v < 0.1]
+    clusters = cluster_points(zero_points, radius=20)
+    zero_locs = []
+    for lat, lon in clusters:
+        addr = reverse_geocode(lat, lon)
+        zero_locs.append({"latitude": lat, "longitude": lon, "address": addr})
+
+    return enriched_stops, zero_locs
