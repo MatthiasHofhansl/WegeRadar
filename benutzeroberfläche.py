@@ -22,7 +22,9 @@ class WegeRadar:
 
         # Variablen zur Speicherung
         self.excel_filename = None
+        self.excel_path = None
         self.gpx_foldername = None
+        self.gpx_path = None
 
         self.setup_ui()
 
@@ -101,6 +103,7 @@ class WegeRadar:
             filetypes=[("Excel-Dateien", "*.xlsx *.xls")]
         )
         if path:
+            self.excel_path = path
             self.excel_filename = os.path.basename(path)
             self.excel_label_selected.config(text=self.excel_filename)
 
@@ -109,12 +112,13 @@ class WegeRadar:
             title="Gebe hier den Pfad für den Ordner mit den GPX-Dateien an:"
         )
         if path:
+            self.gpx_path = path
             self.gpx_foldername = os.path.basename(path)
             self.gpx_label_selected.config(text=self.gpx_foldername)
 
     def start_action(self):
         # Prüfe, ob Excel und GPX ausgewählt sind
-        if not self.excel_filename or not self.gpx_foldername:
+        if not self.excel_path or not self.gpx_path:
             messagebox.showwarning(
                 APP_NAME,
                 "Um fortzufahren, wähle bitte sowohl eine Excel-Datei als auch einen Ordner mit den GPX-Dateien aus.",
@@ -131,6 +135,43 @@ class WegeRadar:
             self.master.state('zoomed')  # Windows/Linux
         except:
             self.master.attributes('-zoomed', True)  # macOS
+
+        # Linke Box für GPX-Dateien-Liste
+        left_frame = tk.Frame(self.master, bg="white", width=200)
+        left_frame.pack(side="left", fill="y")
+
+        # Titel in Box
+        title = tk.Label(
+            left_frame,
+            text="Teilnehmer",
+            font=("Arial", 14, "bold"),
+            bg="white"
+        )
+        title.pack(pady=(10, 5))
+
+        # Dateien aus Ordner auslesen und Namen sortieren
+        files = [f for f in os.listdir(self.gpx_path) if f.lower().endswith('.gpx')]
+        names = []
+        for f in files:
+            base = os.path.splitext(f)[0]
+            parts = base.split('_')
+            if len(parts) >= 2:
+                last = parts[0]
+                first = parts[1]
+                names.append((last, first))
+        # Alphabetisch nach Nachname sortieren
+        names.sort(key=lambda x: x[0])
+
+        # Anzeige
+        for last, first in names:
+            lbl = tk.Label(
+                left_frame,
+                text=f"{last}, {first}",
+                font=("Arial", 12),
+                bg="white",
+                anchor="w"
+            )
+            lbl.pack(fill="x", padx=10, pady=2)
 
 if __name__ == "__main__":
     root = tk.Tk()
