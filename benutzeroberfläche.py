@@ -276,7 +276,7 @@ class WegeRadar:
             tk.Label(
                 self.content_frame,
                 text=f"Datum der GPX-Datei: {date}",
-                font=("Arial", 14),
+                font=("Arial", 14, "bold"),
                 bg="white",
                 anchor="w"
             ).pack(fill="x", padx=20, pady=(5, 2))
