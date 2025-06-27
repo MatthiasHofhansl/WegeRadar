@@ -1,3 +1,4 @@
+# algorithm.py
 import os
 import tkinter as tk
 from tkinter import messagebox
@@ -6,6 +7,7 @@ def show_date_dialog(master, gpx_folder, last, first):
     """
     Öffnet einen Dialog mit allen verfügbaren GPX-Dateien für
     last_first_<Datum>.gpx im Ordner und lässt den Nutzer ein Datum wählen.
+    Wenn nur eine Datei existiert, wird direkt diese ausgewählt.
     """
     prefix = f"{last}_{first}_"
     files = [
@@ -21,7 +23,14 @@ def show_date_dialog(master, gpx_folder, last, first):
         )
         return
 
-    # Datum → Dateiname mappen
+    # Wenn nur eine Datei vorhanden ist, direkt auswählen
+    if len(files) == 1:
+        filename = files[0]
+        fullpath = os.path.join(gpx_folder, filename)
+        print(f"Ausgewählte GPX-Datei: {fullpath}")
+        return
+
+    # Mehrere Dateien: Datum → Dateiname mappen
     date_map = {}
     for f in files:
         base = os.path.splitext(f)[0]
@@ -31,7 +40,7 @@ def show_date_dialog(master, gpx_folder, last, first):
 
     dates = sorted(date_map.keys())
 
-    # Dialogfenster
+    # Dialogfenster für die Datumsauswahl
     dialog = tk.Toplevel(master)
     dialog.title("GPX-Auswahl")
     dialog.transient(master)
@@ -47,14 +56,14 @@ def show_date_dialog(master, gpx_folder, last, first):
     )
     lbl.pack(pady=(10, 10), padx=10)
 
-    # Buttons für jedes Datum
+    # Auswahl-Callback
     def select(d):
         filename = date_map[d]
         fullpath = os.path.join(gpx_folder, filename)
-        # Hier könnte der nächste Schritt im Algorithmus stehen:
         print(f"Ausgewählte GPX-Datei: {fullpath}")
         dialog.destroy()
 
+    # Buttons für jedes Datum
     for d in dates:
         btn = tk.Button(
             dialog,
