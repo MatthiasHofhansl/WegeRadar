@@ -1,6 +1,6 @@
 import os
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog
 
 # App-Name
 APP_NAME = "WegeRadar"
@@ -100,9 +100,7 @@ class WegeRadar:
             title="Gebe hier den Pfad für deine Excel-Datei/das Wegetagebuch an:",
             filetypes=[("Excel-Dateien", "*.xlsx *.xls")]
         )
-        if not path:
-            messagebox.showerror("Fehler", "Keine Datei ausgewählt.")
-        else:
+        if path:
             self.excel_filename = os.path.basename(path)
             self.excel_label_selected.config(text=self.excel_filename)
 
@@ -110,15 +108,24 @@ class WegeRadar:
         path = filedialog.askdirectory(
             title="Gebe hier den Pfad für den Ordner mit den GPX-Dateien an:"
         )
-        if not path:
-            messagebox.showerror("Fehler", "Keinen Ordner ausgewählt.")
-        else:
+        if path:
             self.gpx_foldername = os.path.basename(path)
             self.gpx_label_selected.config(text=self.gpx_foldername)
 
     def start_action(self):
-        # Platzhalter für Start-Aktion
-        messagebox.showinfo(APP_NAME, "Start wurde gedrückt!")
+        # Alles entfernen, Hintergrund weiß und Vollbild
+        self.master.title(APP_NAME)
+        for widget in self.master.winfo_children():
+            widget.destroy()
+        self.master.configure(background="white")
+        # Vollbild-Modus aktivieren
+        try:
+            self.master.attributes('-fullscreen', True)
+        except:
+            # Fallback Maximierung
+            w = self.master.winfo_screenwidth()
+            h = self.master.winfo_screenheight()
+            self.master.geometry(f"{w}x{h}+0+0")
 
 if __name__ == "__main__":
     root = tk.Tk()
