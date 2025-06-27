@@ -1,6 +1,7 @@
 import os
 import tkinter as tk
 from tkinter import filedialog, messagebox
+import importlib
 
 # App-Name
 APP_NAME = "WegeRadar"
@@ -13,6 +14,7 @@ class WegeRadar:
         # Fenstergröße und Zentrierung
         window_width = 500
         window_height = 600
+        self.window_width = window_width  # für wraplength des Hinweistextes
         screen_width = master.winfo_screenwidth()
         screen_height = master.winfo_screenheight()
         x = (screen_width - window_width) // 2
@@ -26,7 +28,6 @@ class WegeRadar:
         self.gpx_path = None
         self.gpx_foldername = None
 
-        self.window_width = window_width
         self.setup_ui()
 
     def setup_ui(self):
@@ -88,10 +89,13 @@ class WegeRadar:
         )
         self.gpx_label_selected.grid(row=3, column=1, padx=5, pady=(5, 5))
 
-        # Hinweis unter Pfadauswahl
+        # Hinweistext über dem Start-Button
         info_start = tk.Label(
             self.master,
-            text="(Du musst nicht zwingend eine Excel-Datei/ein Wegetagebuch hochladen. Das Hochladen eines Ordners mit GPX-Dateien ist allerdings notwendig.)",
+            text=(
+                "(Du musst nicht zwingend eine Excel-Datei/ein Wegetagebuch hochladen. "
+                "Das Hochladen eines Ordners mit GPX-Dateien ist allerdings notwendig.)"
+            ),
             font=("Arial", 10),
             fg="gray",
             wraplength=self.window_width - 40,
@@ -129,7 +133,7 @@ class WegeRadar:
             self.gpx_label_selected.config(text=self.gpx_foldername)
 
     def start_action(self):
-        # Prüfe, ob GPX-Ordner ausgewählt wurde
+        # Prüfe, ob GPX-Ordner ausgewählt ist (Excel optional)
         if not self.gpx_path:
             messagebox.showwarning(
                 APP_NAME,
@@ -137,17 +141,20 @@ class WegeRadar:
                 parent=self.master
             )
             return
-        # Leere Fenster und Hintergrund
+
+        # Altes GUI entfernen, Hintergrund weiß setzen
         self.master.title(APP_NAME)
         for widget in self.master.winfo_children():
             widget.destroy()
         self.master.configure(background="white")
+
+        # Fenster maximieren (mit sichtbarer Titelleiste)
         try:
-            self.master.state('zoomed')  # Windows/Linux
+            self.master.state('zoomed')       # Windows/Linux
         except:
             self.master.attributes('-zoomed', True)  # macOS
 
-        # Scrollbarer Container für Teilnehmerliste
+        # Scrollbarer Container für Namen
         container = tk.Frame(self.master, bg="white", width=200)
         container.pack(side="left", fill="y")
         canvas = tk.Canvas(container, bg="white", width=200, highlightthickness=0)
@@ -162,11 +169,11 @@ class WegeRadar:
         canvas.pack(side="left", fill="y", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # Trennlinie
+        # Vertikale Trennlinie rechts neben der Box
         separator = tk.Frame(self.master, bg="black", width=2)
         separator.pack(side="left", fill="y")
 
-        # Titel
+        # Titel in Box
         title = tk.Label(
             scroll_frame,
             text="Teilnehmerinnen\nund Teilnehmer",
@@ -176,7 +183,7 @@ class WegeRadar:
         )
         title.pack(pady=(10, 5))
 
-        # Namen einlesen und sortieren
+        # Namen aus GPX-Dateien einlesen und sortieren
         files = [f for f in os.listdir(self.gpx_path) if f.lower().endswith('.gpx')]
         names_set = set()
         for f in files:
@@ -187,7 +194,7 @@ class WegeRadar:
                 names_set.add((last, first))
         names = sorted(names_set, key=lambda x: x[0])
 
-        # Anzeige mit Abschneiden und Hover
+        # Anzeige mit Abschneiden, Hover- und Click-Effekt
         max_chars = 20
         for last, first in names:
             full_name = f"{last}, {first}"
@@ -201,8 +208,25 @@ class WegeRadar:
                 width=20
             )
             lbl.pack(fill="x", padx=10, pady=2)
+            # Hover-Effekt
             lbl.bind("<Enter>", lambda e, l=lbl: l.config(bg="#e0e0e0"))
             lbl.bind("<Leave>", lambda e, l=lbl: l.config(bg="white"))
+            # Klick-Event: ruft algorithm.py auf
+            lbl.bind(
+                "<Button-1>",
+                lambda e, last=last, first=first: self.on_name_click(last, first)
+            )
+
+    def on_name_click(self, last, first):
+        """
+        Wird ausgelöst, wenn auf einen Namen geklickt wird.
+        Lädt das Modul 'algorithm.py' neu, sodass dessen Inhalt ausgeführt werden kann.
+        """
+        try:
+            import algorithm
+            importlib.reload(algorithm)
+        except ImportError:
+            messagebox.showerror(APP_NAME, "Die Datei 'algorithm.py' wurde nicht gefunden.")
 
 if __name__ == "__main__":
     root = tk.Tk()
