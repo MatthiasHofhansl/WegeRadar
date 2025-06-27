@@ -85,7 +85,7 @@ class WegeRadar:
         )
         self.gpx_label_selected.grid(row=3, column=1, padx=5, pady=(5, 5))
 
-        # Start-Button am unteren Fensterrand mit neuer Schrift und angepasster Höhe
+        # Start-Button bündig am unteren Fensterrand ohne Padding
         start_btn = tk.Button(
             self.master,
             text="Start",
@@ -93,7 +93,7 @@ class WegeRadar:
             font=("Arial", 24, "bold"),
             height=2
         )
-        start_btn.pack(side="bottom", fill="x", pady=(0, 10))
+        start_btn.pack(side="bottom", fill="x")
 
     def select_excel(self):
         path = filedialog.askopenfilename(
@@ -119,7 +119,6 @@ class WegeRadar:
     def start_action(self):
         # Platzhalter für Start-Aktion
         messagebox.showinfo(APP_NAME, "Start wurde gedrückt!")
-
 
 if __name__ == "__main__":
     root = tk.Tk()
