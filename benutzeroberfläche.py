@@ -2,6 +2,7 @@ import os
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import importlib
+import algorithm  # muss im gleichen Verzeichnis liegen
 
 # App-Name
 APP_NAME = "WegeRadar"
@@ -20,7 +21,6 @@ class WegeRadar:
         x = (screen_width - window_width) // 2
         y = (screen_height - window_height) // 2
         master.geometry(f"{window_width}x{window_height}+{x}+{y}")
-        # Fenster darf jetzt wieder in beide Richtungen skaliert werden
         master.resizable(True, True)
 
         # Variablen zur Speicherung
@@ -28,6 +28,7 @@ class WegeRadar:
         self.excel_filename = None
         self.gpx_path = None
         self.gpx_foldername = None
+        self.content_frame = None  # Platz für Detail-Ansicht
 
         self.setup_ui()
 
@@ -201,6 +202,10 @@ class WegeRadar:
         separator = tk.Frame(self.master, bg="black", width=2)
         separator.pack(side="left", fill="y")
 
+        # Container für Detailansicht rechts
+        self.content_frame = tk.Frame(self.master, bg="white")
+        self.content_frame.pack(side="left", fill="both", expand=True)
+
         # Titel in Box
         title = tk.Label(
             scroll_frame,
@@ -243,7 +248,7 @@ class WegeRadar:
             lbl.bind("<Enter>", lambda e, l=lbl: l.config(bg="#e0e0e0"))
             lbl.bind("<Leave>", lambda e, l=lbl: l.config(bg="white"))
 
-            # Klick-Event: ruft algorithm.py auf
+            # Klick-Event: ruft algorithm.show_date_dialog UND zeigt Detail-View
             lbl.bind(
                 "<Button-1>",
                 lambda e, last=last, first=first: self.on_name_click(last, first)
@@ -251,19 +256,46 @@ class WegeRadar:
 
     def on_name_click(self, last, first):
         """
-        Wird ausgelöst, wenn auf einen Namen geklickt wird.
-        Zeigt, falls nötig, das Datumsauswahl-Dialogfenster aus algorithm.py.
+        Zeigt rechts von der Liste:
+        - Überschrift mit "Teilnehmer(in): Nachname, Vorname"
+        - Rotes Kreuz zum Schließen
+        - Ruft show_date_dialog aus algorithm.py auf, falls nötig
         """
-        try:
-            import algorithm
-            importlib.reload(algorithm)
-            algorithm.show_date_dialog(self.master, self.gpx_path, last, first)
-        except ImportError:
-            messagebox.showerror(
-                APP_NAME,
-                "Die Datei 'algorithm.py' wurde nicht gefunden.",
-                parent=self.master
-            )
+        # Clear content_frame
+        for w in self.content_frame.winfo_children():
+            w.destroy()
+
+        # Überschrift
+        header = tk.Label(
+            self.content_frame,
+            text=f"Teilnehmer(in): {last}, {first}",
+            font=("Arial", 16, "bold"),
+            bg="white",
+            anchor="w"
+        )
+        header.pack(fill="x", padx=20, pady=(20, 10))
+
+        # Rotes Kreuz zum Schließen der Detail-Ansicht
+        close_btn = tk.Button(
+            self.content_frame,
+            text="✖",
+            font=("Arial", 12, "bold"),
+            fg="red",
+            bg="white",
+            bd=0,
+            command=self._close_detail
+        )
+        # oben rechts platzieren (10px Abstand von rechten Rand)
+        close_btn.place(relx=1.0, x=-10, y=10, anchor="ne")
+
+        # GPX-Auswahl-Dialog aufrufen (wichtig: Dialog öffnet sich über content_frame)
+        importlib.reload(algorithm)
+        algorithm.show_date_dialog(self.master, self.gpx_path, last, first)
+
+    def _close_detail(self):
+        # entfernt alle Widgets in content_frame, gibt den Fokus zurück
+        for w in self.content_frame.winfo_children():
+            w.destroy()
 
 if __name__ == "__main__":
     root = tk.Tk()
