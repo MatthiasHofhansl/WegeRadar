@@ -2,13 +2,23 @@
 import os
 import tkinter as tk
 from tkinter import messagebox
+import gpxpy
+import gpxpy.gpx
+import datetime
+import requests
+from math import radians, cos, sin, asin, sqrt
+
+# Für Reverse-Geocoding und POI-Lookup:
+NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
+OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+USER_AGENT = "WegeRadarApp/1.0 (your_email@example.com)"
+
 
 def show_date_dialog(master, gpx_folder, last, first):
     """
     Öffnet einen Dialog mit allen verfügbaren GPX-Dateien für
     last_first_<Datum>.gpx im Ordner und lässt den Nutzer ein Datum wählen.
-    Gibt das ausgewählte Datum zurück. Wenn nur eine Datei existiert,
-    wird direkt dieses Datum zurückgegeben.
+    Gibt das ausgewählte Datum zurück.
     """
     prefix = f"{last}_{first}_"
     files = [
@@ -34,10 +44,7 @@ def show_date_dialog(master, gpx_folder, last, first):
 
     # Wenn nur eine Datei vorhanden ist, direkt zurückgeben
     if len(date_map) == 1:
-        date = next(iter(date_map))
-        fullpath = os.path.join(gpx_folder, date_map[date])
-        print(f"Ausgewählte GPX-Datei: {fullpath}")
-        return date
+        return next(iter(date_map))
 
     # Mehrere Dateien → Auswahl-Dialog
     dates = sorted(date_map.keys())
@@ -61,9 +68,6 @@ def show_date_dialog(master, gpx_folder, last, first):
 
     def select(d):
         selected["date"] = d
-        filename = date_map[d]
-        fullpath = os.path.join(gpx_folder, filename)
-        print(f"Ausgewählte GPX-Datei: {fullpath}")
         dialog.destroy()
 
     for d in dates:
@@ -81,3 +85,132 @@ def show_date_dialog(master, gpx_folder, last, first):
 
     master.wait_window(dialog)
     return selected["date"]
+
+
+def haversine(lat1, lon1, lat2, lon2):
+    """
+    Berechnet die Distanz in Metern zwischen zwei GPS-Punkten.
+    """
+    # Convert decimal degrees to radians
+    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+    # haversine
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+    c = 2 * asin(sqrt(a))
+    r = 6371000  # Radius der Erde in Metern
+    return c * r
+
+
+def reverse_geocode(lat, lon):
+    """
+    Holt eine menschenlesbare Adresse via Nominatim.
+    """
+    params = {
+        "format": "jsonv2",
+        "lat": lat,
+        "lon": lon,
+        "zoom": 18,
+        "addressdetails": 1
+    }
+    headers = {"User-Agent": USER_AGENT}
+    r = requests.get(NOMINATIM_URL, params=params, headers=headers, timeout=10)
+    r.raise_for_status()
+    data = r.json()
+    return data.get("display_name")
+
+
+def lookup_pois(lat, lon, radius=15):
+    """
+    Findet benannte POIs (amenity) im Umkreis via Overpass.
+    """
+    query = f"""
+    [out:json];
+    (
+      node(around:{radius},{lat},{lon})[amenity][name];
+      way(around:{radius},{lat},{lon})[amenity][name];
+    );
+    out center;
+    """
+    r = requests.post(OVERPASS_URL, data={"data": query}, headers={"User-Agent": USER_AGENT}, timeout=15)
+    r.raise_for_status()
+    elements = r.json().get("elements", [])
+    names = set()
+    for el in elements:
+        tags = el.get("tags", {})
+        name = tags.get("name")
+        if name:
+            names.add(name)
+    return list(names)
+
+
+def analyze_gpx(gpx_folder, last, first, date, radius=15, min_duration_sec=300):
+    """
+    Lädt die GPX-Datei, erkennt Stopps ≥ min_duration_sec im radius (m),
+    führt Reverse-Geocoding und POI-Suche durch und gibt eine Liste zurück.
+    """
+    filename = f"{last}_{first}_{date}.gpx"
+    path = os.path.join(gpx_folder, filename)
+    if not os.path.exists(path):
+        return []
+
+    # Parse GPX
+    with open(path, "r", encoding="utf-8") as f:
+        gpx = gpxpy.parse(f)
+
+    # Alle Trackpoints sammeln
+    points = []
+    for track in gpx.tracks:
+        for segment in track.segments:
+            for pt in segment.points:
+                if pt.time:
+                    points.append((pt.latitude, pt.longitude, pt.time))
+    if not points:
+        return []
+
+    # Sortiere nach Zeit
+    points.sort(key=lambda x: x[2])
+
+    stops = []
+    i = 0
+    n = len(points)
+    while i < n:
+        lat0, lon0, t0 = points[i]
+        j = i + 1
+        while j < n:
+            lat1, lon1, t1 = points[j]
+            if haversine(lat0, lon0, lat1, lon1) <= radius:
+                j += 1
+            else:
+                break
+        # Dauer berechnen
+        dur = (points[j-1][2] - t0).total_seconds()
+        if dur >= min_duration_sec:
+            # Mittelpunkt für Geocoding
+            lats = [p[0] for p in points[i:j]]
+            lons = [p[1] for p in points[i:j]]
+            mid_lat = sum(lats)/len(lats)
+            mid_lon = sum(lons)/len(lons)
+            # Reverse-Geocode + POIs
+            try:
+                addr = reverse_geocode(mid_lat, mid_lon)
+            except Exception:
+                addr = "Adresse nicht verfügbar"
+            try:
+                pois = lookup_pois(mid_lat, mid_lon, radius)
+            except Exception:
+                pois = []
+            stops.append({
+                "start_time": t0,
+                "end_time": points[j-1][2],
+                "duration_seconds": dur,
+                "latitude": mid_lat,
+                "longitude": mid_lon,
+                "address": addr,
+                "pois": pois
+            })
+            i = j  # überspringe bis hier
+        else:
+            i += 1
+
+    return stops

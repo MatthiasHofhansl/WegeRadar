@@ -1,3 +1,4 @@
+# benutzeroberfläche.py
 import os
 import tkinter as tk
 from tkinter import filedialog, messagebox
@@ -239,8 +240,8 @@ class WegeRadar:
         Zeigt rechts von der Liste:
         - Überschrift mit kleinem "Teilnehmer(in): Nachname, Vorname"
         - Rotes Kreuz zum Schließen
-        - Datum der GPX-Datei
-        - Horizontale Linie unter dem Datum
+        - Datum der GPX-Datei-Auswahl
+        - Liste der Aufenthaltsorte mit Dauer und POIs
         """
         # Alte Detail-Inhalte löschen
         for w in self.content_frame.winfo_children():
@@ -271,24 +272,60 @@ class WegeRadar:
         # Datumsauswahl per algorithm.show_date_dialog
         importlib.reload(algorithm)
         date = algorithm.show_date_dialog(self.master, self.gpx_path, last, first)
-        if date:
-            # Datum-Label
+        if not date:
+            return
+
+        # Datum-Label
+        tk.Label(
+            self.content_frame,
+            text=f"Datum der GPX-Datei: {date}",
+            font=("Arial", 14, "bold"),
+            bg="white",
+            anchor="w"
+        ).pack(fill="x", padx=20, pady=(5, 2))
+
+        # Horizontale Trennlinie (ohne Seitenabstand)
+        tk.Frame(
+            self.content_frame,
+            bg="black",
+            height=2
+        ).pack(fill="x", pady=(0, 10))
+
+        # Analysiere GPX und zeige Aufenthaltsorte
+        stops = algorithm.analyze_gpx(self.gpx_path, last, first, date)
+        if not stops:
             tk.Label(
                 self.content_frame,
-                text=f"Datum der GPX-Datei: {date}",
-                font=("Arial", 14, "bold"),
+                text="Keine Aufenthaltsorte ≥5 Min gefunden.",
+                font=("Arial", 12),
                 bg="white",
-                anchor="w"
-            ).pack(fill="x", padx=20, pady=(5, 2))
+                anchor="w",
+                wraplength=self.window_width*2
+            ).pack(fill="x", padx=20, pady=5)
+            return
 
-            # Horizontale Trennlinie (ohne Seitenabstand)
-            tk.Frame(
-                self.content_frame,
-                bg="black",
-                height=2
-            ).pack(fill="x", pady=(0, 10))
+        for stop in stops:
+            frame = tk.Frame(self.content_frame, bg="white")
+            frame.pack(fill="x", padx=20, pady=5)
 
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = WegeRadar(root)
-    root.mainloop()
+            addr = stop.get("address", "Unbekannte Adresse")
+            mins = int(stop["duration_seconds"] / 60)
+            tk.Label(
+                frame,
+                text=f"{addr}  –  {mins} Min.",
+                font=("Arial", 12),
+                bg="white",
+                anchor="w",
+                wraplength=self.window_width*2
+            ).pack(fill="x")
+
+            pois = stop.get("pois", [])
+            if pois:
+                tk.Label(
+                    frame,
+                    text="POIs: " + ", ".join(pois),
+                    font=("Arial", 10, "italic"),
+                    bg="white",
+                    anchor="w",
+                    wraplength=self.window_width*2
+                ).pack(fill="x", padx=(10,0), pady=(2,0))
