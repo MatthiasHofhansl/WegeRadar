@@ -20,8 +20,7 @@ class WegeRadar:
         x = (screen_width - window_width) // 2
         y = (screen_height - window_height) // 2
         master.geometry(f"{window_width}x{window_height}+{x}+{y}")
-        # Erlaube Resizing, damit der Maximize-Button aktiv bleibt
-        master.resizable(True, True)
+        master.resizable(False, False)
 
         # Variablen zur Speicherung
         self.excel_path = None
@@ -177,10 +176,12 @@ class WegeRadar:
         canvas.pack(side="left", fill="y", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # Mausrad-Scrollen aktivieren
+        # Mausrad-Scrollen aktivieren, wenn sich der Zeiger über der Liste befindet
         def _on_mousewheel(event):
+            # Windows / macOS
             if hasattr(event, 'delta') and event.delta:
                 canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            # Linux (Button-4 = hoch, Button-5 = runter)
             elif event.num == 4:
                 canvas.yview_scroll(-1, "units")
             elif event.num == 5:
@@ -239,8 +240,11 @@ class WegeRadar:
             )
             lbl.pack(fill="x", padx=10, pady=2)
 
+            # Hover-Effekt
             lbl.bind("<Enter>", lambda e, l=lbl: l.config(bg="#e0e0e0"))
             lbl.bind("<Leave>", lambda e, l=lbl: l.config(bg="white"))
+
+            # Klick-Event: ruft algorithm.py auf
             lbl.bind(
                 "<Button-1>",
                 lambda e, last=last, first=first: self.on_name_click(last, first)
