@@ -281,12 +281,12 @@ class WegeRadar:
                 anchor="w"
             ).pack(fill="x", padx=20, pady=(5, 2))
 
-            # Horizontale Trennlinie
+            # Horizontale Trennlinie (ohne Seitenabstand)
             tk.Frame(
                 self.content_frame,
                 bg="black",
                 height=2
-            ).pack(fill="x", padx=20, pady=(0, 10))
+            ).pack(fill="x", pady=(0, 10))
 
 if __name__ == "__main__":
     root = tk.Tk()
