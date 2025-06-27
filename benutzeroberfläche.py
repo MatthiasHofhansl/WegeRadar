@@ -176,12 +176,10 @@ class WegeRadar:
         canvas.pack(side="left", fill="y", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # Mausrad-Scrollen aktivieren, wenn sich der Zeiger über der Liste befindet
+        # Mausrad-Scrollen aktivieren
         def _on_mousewheel(event):
-            # Windows / macOS
             if hasattr(event, 'delta') and event.delta:
                 canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-            # Linux (Button-4 = hoch, Button-5 = runter)
             elif event.num == 4:
                 canvas.yview_scroll(-1, "units")
             elif event.num == 5:
@@ -253,14 +251,18 @@ class WegeRadar:
     def on_name_click(self, last, first):
         """
         Wird ausgelöst, wenn auf einen Namen geklickt wird.
-        Lädt das Modul 'algorithm.py' neu, sodass dessen Inhalt ausgeführt werden kann.
+        Zeigt, falls nötig, das Datumsauswahl-Dialogfenster aus algorithm.py.
         """
         try:
             import algorithm
             importlib.reload(algorithm)
+            algorithm.show_date_dialog(self.master, self.gpx_path, last, first)
         except ImportError:
-            messagebox.showerror(APP_NAME,
-                                 "Die Datei 'algorithm.py' wurde nicht gefunden.")
+            messagebox.showerror(
+                APP_NAME,
+                "Die Datei 'algorithm.py' wurde nicht gefunden.",
+                parent=self.master
+            )
 
 if __name__ == "__main__":
     root = tk.Tk()

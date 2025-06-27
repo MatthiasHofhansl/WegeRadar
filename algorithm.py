@@ -37,7 +37,7 @@ def show_date_dialog(master, gpx_folder, last, first):
     dialog.transient(master)
     dialog.grab_set()
 
-    # Frage-Label
+    # Frage-Label mittig
     lbl = tk.Label(
         dialog,
         text="Für welchen Tag möchtest du die GPX-Datei auswerten?",
