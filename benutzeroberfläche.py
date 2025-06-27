@@ -117,7 +117,7 @@ class WegeRadar:
         if not self.excel_filename or not self.gpx_foldername:
             messagebox.showwarning(
                 APP_NAME,
-                "Um fortzufahren, wähle bitte sowohl eine Excel-Datei/das Wegetagebuch als auch einen Ordner mit den GPX-Dateien aus.",
+                "Um fortzufahren, wähle bitte sowohl eine Excel-Datei als auch einen Ordner mit den GPX-Dateien aus.",
                 parent=self.master
             )
             return
