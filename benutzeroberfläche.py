@@ -304,17 +304,29 @@ class WegeRadar:
             ).pack(fill="x", padx=20, pady=5)
 
             # ----------------------------------------------------------
-            # Echte Streckenlänge statt Luftlinie
+            # Distanz *und* Durchschnittsgeschwindigkeit
             # ----------------------------------------------------------
             if idx < len(places):
                 dist_km = p.get("next_dist_km_real")
-                # Fallback (sollte nie nötig sein, aber zur Sicherheit):
+                speed_kmh = p.get("next_speed_kmh_real")
+
+                # Fallbacks – sollten selten nötig sein
                 if dist_km is None:
                     nxt = places[idx]
                     dist_km = _haversine_km(
                         p["lat"], p["lon"], nxt["lat"], nxt["lon"]
                     )
-                weg_text = f"Weg {idx}: Distanz {dist_km:.2f} km"
+                if speed_kmh is None:
+                    nxt = places[idx]
+                    hours = (
+                        nxt["start_dt"] - p["end_dt"]
+                    ).total_seconds() / 3600
+                    speed_kmh = dist_km / hours if hours > 0 else 0.0
+
+                weg_text = (
+                    f"Weg {idx} │ Distanz: {dist_km:.2f} km; "
+                    f"Durchschnittliche Geschwindigkeit: {speed_kmh:.2f} km/h"
+                )
                 tk.Label(
                     self.list_inner,
                     text=weg_text,

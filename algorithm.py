@@ -12,6 +12,13 @@ Regeln zum Zusammenfassen:
 1. Ort-Übergang in derselben Minute → verschmelzen (Endzeit wird erweitert).
 2. Direkt aufeinanderfolgende Orte mit IDENTISCHER Adresse und
    Zeitlücke ≤ 10 Minuten → verschmelzen (Endzeit wird erweitert).
+
+Neu:
+----  
+Für jede Weg-Etappe wird zusätzlich  
+    • next_dist_km_real         (Kilometer, GPX-Spur)  
+    • next_speed_kmh_real       (Kilometer pro Stunde)  
+gespeichert.
 """
 
 from __future__ import annotations
@@ -151,9 +158,9 @@ def analyze_gpx(
     min_stop_sec: int = MIN_STOP_DURATION_SEC,
 ) -> List[dict]:
     """
-    Analysiert GPX, verschmilzt Orte nach beiden Regeln und
-    ergänzt pro Aufenthalt die reale Distanz zum nächsten Ort
-    anhand der GPX-Spur (Option 1 aus der Diskussion).
+    Analysiert GPX, verschmilzt Orte nach beiden Regeln und ergänzt pro Aufenthalt:
+        • next_dist_km_real       (Distanz zum nächsten Ort)
+        • next_speed_kmh_real     (ø Geschwindigkeit auf dieser Weg-Etappe)
     """
     path = os.path.join(gpx_folder, f"{last}_{first}_{date}.gpx")
     if not os.path.exists(path):
@@ -235,9 +242,8 @@ def analyze_gpx(
             final.append(item)
 
     # --------------------------------------------------------------------- #
-    # Reale Streckenlängen zwischen aufeinanderfolgenden Aufenthalten
+    # Distanz + ø Geschwindigkeit für jedes Weg-Segment (final[i] → final[i+1])
     # --------------------------------------------------------------------- #
-    # Vorbereiten: Zeitstempel in UTC für schnelle Vergleiche
     utc_start_end = [
         (
             s["end_dt"].astimezone(timezone.utc),
@@ -246,28 +252,29 @@ def analyze_gpx(
         for s, n in zip(final[:-1], final[1:])
     ]
 
-    # Für jede Weg-Etappe summieren wir die Haversine-Abstände der
-    # *aufgezeichneten* Track-Punkte zwischen den Zeitfenstern.
     for seg_idx, (t_end_prev, t_start_next) in enumerate(utc_start_end):
+        # Distanz summieren
         dist_m_real = 0.0
         acc = False
         for i in range(len(pts) - 1):
             t0, lat0, lon0 = pts[i]
             t1, lat1, lon1 = pts[i + 1]
 
-            # Noch vor dem Segment?
             if t1 < t_end_prev:
                 continue
-            # Ab dem ersten Punkt nach t_end_prev sammeln
             if not acc and t0 >= t_end_prev:
                 acc = True
             if acc:
                 dist_m_real += haversine(lat0, lon0, lat1, lon1)
-            # Segment fertig?
             if acc and t1 >= t_start_next:
                 break
 
-        # Kilometer mit 2 Nachkommastellen speichern
-        final[seg_idx]["next_dist_km_real"] = round(dist_m_real / 1000.0, 2)
+        dist_km = dist_m_real / 1000.0
+        time_h  = (t_start_next - t_end_prev).total_seconds() / 3600
+        speed_kmh = dist_km / time_h if time_h > 0 else None
+
+        final[seg_idx]["next_dist_km_real"]  = round(dist_km, 2)
+        if speed_kmh is not None:
+            final[seg_idx]["next_speed_kmh_real"] = round(speed_kmh, 2)
 
     return final
