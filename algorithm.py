@@ -2,31 +2,28 @@
 algorithm.py
 ============
 
-Erkennt Aufenthalts‐Orte in einer GPX‐Datei.
+Erkennt Aufenthalts-Orte und liefert zu jedem Ort
 
-* Punkte werden zu Clustern (Orten) zusammengefasst,
-  wenn sie ≥ 3 min in einem Radius von 50 m liegen.
+    • Koordinaten (lat, lon)
+    • start_dt, end_dt   (Europe/Berlin)
+    • Name, Straße, Hausnr., PLZ, Stadt
 
-* Start- und Endpunkt der Aufzeichnung werden immer ausgegeben.
-
-* Wenn zwei aufeinander­folgende Orte sich in **derselben Minute berühren**
-  (Ende Ort A und Start Ort B haben identisches YYYY-MM-DD HH:MM),
-  werden sie **verschmolzen**:
-      – Koordinaten/Adresse stammen von Ort A  
-      – Startzeit bleibt von Ort A  
-      – Endzeit wird auf die Endzeit von Ort B gesetzt
+Regeln zum Zusammenfassen:
+1. Ort-Übergang in derselben Minute → verschmelzen (Endzeit wird erweitert).
+2. Direkt aufeinanderfolgende Orte mit IDENTISCHER Adresse und
+   Zeitlücke ≤ 10 Minuten → verschmelzen (Endzeit wird erweitert).
 """
 
 from __future__ import annotations
 
 import os, time, requests, gpxpy
 from math import radians, cos, sin, asin, sqrt
-from datetime import timezone, datetime
+from datetime import timezone, datetime, timedelta
 from typing import Dict, List, Tuple
 
-try:                                               # Zeitzonen
+try:
     from zoneinfo import ZoneInfo
-except ImportError:                                # Fallback (Python < 3.9)
+except ImportError:                                # Python < 3.9
     from datetime import timezone as ZoneInfo      # type: ignore
     ZoneInfo = lambda tz: timezone.utc             # type: ignore
 
@@ -36,12 +33,13 @@ except ImportError:                                # Fallback (Python < 3.9)
 DIST_THRESHOLD_M      = 50
 MIN_STOP_DURATION_SEC = 180
 NOMINATIM_SLEEP_SEC   = 1
+MAX_GAP_SEC_SAME_ADDR = 10 * 60        # 10 Minuten
 
 # --------------------------------------------------------------------------- #
 # Hilfsfunktionen
 # --------------------------------------------------------------------------- #
 def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Meter-Distanz zwischen zwei Koordinaten (Großkreis)."""
+    """Meter‐Distanz (Großkreis) zwischen zwei Koordinaten."""
     lat1, lon1, lat2, lon2 = map(radians, (lat1, lon1, lat2, lon2))
     dlat, dlon = lat2 - lat1, lon2 - lon1
     a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
@@ -61,7 +59,7 @@ def _extract_name(js: dict) -> str:
     return ""
 
 def reverse_geocode(lat: float, lon: float) -> Dict[str, str]:
-    """Liefert Name, Straße, Hausnr., PLZ, Stadt (mit Cache & Rate-Limit)."""
+    """Liefert Address-Dict (mit Cache & Rate-Limit)."""
     key = (round(lat, 5), round(lon, 5))
     if key in _GEOCACHE:
         return _GEOCACHE[key]
@@ -70,8 +68,8 @@ def reverse_geocode(lat: float, lon: float) -> Dict[str, str]:
     try:
         r = requests.get(
             _NOMINATIM,
-            params={"format": "jsonv2", "lat": lat, "lon": lon,
-                    "zoom": 18, "addressdetails": 1},
+            params={"format":"jsonv2","lat":lat,"lon":lon,
+                    "zoom":18,"addressdetails":1},
             headers=_HDRS, timeout=5
         )
         if r.status_code == 200:
@@ -94,7 +92,7 @@ def reverse_geocode(lat: float, lon: float) -> Dict[str, str]:
     return res
 
 # --------------------------------------------------------------------------- #
-# Dialog: GPX-Datei auswählen
+# Dialog zur Datumsauswahl
 # --------------------------------------------------------------------------- #
 def show_date_dialog(master, gpx_folder: str, last: str, first: str) -> str | None:
     prefix = f"{last}_{first}_"
@@ -132,9 +130,16 @@ def show_date_dialog(master, gpx_folder: str, last: str, first: str) -> str | No
     return sel["d"]
 
 # --------------------------------------------------------------------------- #
-# Kernfunktion
+# Hauptfunktion
 # --------------------------------------------------------------------------- #
 BERLIN = ZoneInfo("Europe/Berlin")
+
+def _same_address(a: dict, b: dict) -> bool:
+    """Vergleicht Adresse exakt über alle Felder."""
+    for fld in ("name", "road", "house_number", "postcode", "city"):
+        if a.get(fld, "") != b.get(fld, ""):
+            return False
+    return True
 
 def analyze_gpx(
     gpx_folder: str,
@@ -144,13 +149,13 @@ def analyze_gpx(
     dist_m: int = DIST_THRESHOLD_M,
     min_stop_sec: int = MIN_STOP_DURATION_SEC,
 ) -> List[dict]:
-    """Analysiert eine GPX-Datei und gibt eine Liste von Orts-Dicts zurück."""
-    file_path = os.path.join(gpx_folder, f"{last}_{first}_{date}.gpx")
-    if not os.path.exists(file_path):
+    """Analysiert GPX, verschmilzt Orte nach beiden Regeln."""
+    path = os.path.join(gpx_folder, f"{last}_{first}_{date}.gpx")
+    if not os.path.exists(path):
         return []
 
     # ---- GPX einlesen ---------------------------------------------------- #
-    with open(file_path, encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         gpx = gpxpy.parse(f)
 
     pts = [
@@ -181,36 +186,47 @@ def analyze_gpx(
         else:
             i += 1
 
-    # ---- Start/Endpunkt ergänzen ---------------------------------------- #
     coords: List[Tuple[float, float, datetime, datetime]] = [
-        (pts[0][1],  pts[0][2],  pts[0][0],  pts[0][0]),  # Start
+        (pts[0][1],  pts[0][2],  pts[0][0],  pts[0][0]),
         *clusters,
-        (pts[-1][1], pts[-1][2], pts[-1][0], pts[-1][0])  # Ende
+        (pts[-1][1], pts[-1][2], pts[-1][0], pts[-1][0])
     ]
 
-    # ---- Überlappung in gleicher Minute verschmelzen -------------------- #
-    merged: List[Tuple[float, float, datetime, datetime]] = []
+    # ---- 1. Regel: Minute-Überlappung verschmelzen ----------------------- #
+    tmp: List[Tuple[float, float, datetime, datetime]] = []
     for lat, lon, s_dt, e_dt in coords:
-        if not merged:
-            merged.append((lat, lon, s_dt, e_dt))
+        if not tmp:
+            tmp.append((lat, lon, s_dt, e_dt))
             continue
-
-        prev_lat, prev_lon, prev_s, prev_e = merged[-1]
-        if prev_e.strftime("%Y-%m-%d %H:%M") == s_dt.strftime("%Y-%m-%d %H:%M"):
-            # Verschmelzen → Endzeit des neuen Ortes übernehmen
-            merged[-1] = (prev_lat, prev_lon, prev_s, e_dt)
+        p_lat, p_lon, p_s, p_e = tmp[-1]
+        if p_e.strftime("%Y-%m-%d %H:%M") == s_dt.strftime("%Y-%m-%d %H:%M"):
+            tmp[-1] = (p_lat, p_lon, p_s, e_dt)
         else:
-            merged.append((lat, lon, s_dt, e_dt))
+            tmp.append((lat, lon, s_dt, e_dt))
 
-    # ---- Reverse-Geocoding & Ergebnis ----------------------------------- #
-    result: List[dict] = []
-    for lat, lon, start_dt, end_dt in merged:
+    # ---- Reverse-Geocode jedes tmp-Elements ----------------------------- #
+    enriched: List[dict] = []
+    for lat, lon, s_dt, e_dt in tmp:
         addr = reverse_geocode(lat, lon)
         addr.update({
             "lat": lat, "lon": lon,
-            "start_dt": start_dt.astimezone(BERLIN),
-            "end_dt":   end_dt.astimezone(BERLIN)
+            "start_dt": s_dt.astimezone(BERLIN),
+            "end_dt":   e_dt.astimezone(BERLIN)
         })
-        result.append(addr)
+        enriched.append(addr)
 
-    return result
+    # ---- 2. Regel: Gleiche Adresse + ≤10 min Lücke verschmelzen ---------- #
+    final: List[dict] = []
+    for item in enriched:
+        if not final:
+            final.append(item)
+            continue
+
+        prev = final[-1]
+        gap_sec = (item["start_dt"] - prev["end_dt"]).total_seconds()
+        if gap_sec <= MAX_GAP_SEC_SAME_ADDR and _same_address(prev, item):
+            prev["end_dt"] = item["end_dt"]          # Endzeit erweitern
+        else:
+            final.append(item)
+
+    return final
