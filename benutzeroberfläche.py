@@ -90,7 +90,7 @@ class WegeRadar:
             self.gpx_label_selected.config(text=os.path.basename(path))
 
     # ------------------------------------------------------- #
-    # Hauptaktion
+    # Hauptaktion nach Klick auf "Start"
     # ------------------------------------------------------- #
     def start_action(self):
         if not self.gpx_path:
@@ -215,22 +215,42 @@ class WegeRadar:
 
         if not origins:
             tk.Label(self.content_frame,
-                     text="Keine Ausgangskoordinaten gefunden.",
+                     text="Keine Orte gefunden.",
                      font=("Arial", 12), bg="white", anchor="w")\
                 .pack(fill="x", padx=20, pady=5)
             return
 
-        for lat, lon, addr in origins:
+        # Nummerierung: Ort 1, Ort 2, …
+        for idx, place in enumerate(origins, 1):
+            name   = place.get("name", "").strip()
+            road   = place.get("road", "").strip()
+            house  = place.get("house_number", "").strip()
+            street = " ".join(x for x in [road, house] if x)
+            pc     = place.get("postcode", "").strip()
+            city   = place.get("city", "").strip()
+            pc_city = ", ".join(x for x in [pc, city] if x)
+            suburb = place.get("suburb", "").strip() or "-"
+
+            # Baue die Hauptzeile zusammen
+            main_parts = []
+            if name:
+                main_parts.append(name)
+            # Straße + Postleitzahl/Stadt
+            addr_line = ", ".join(x for x in [street, pc_city] if x)
+            if addr_line:
+                main_parts.append(addr_line)
+
+            text = f"Ort {idx}: {' | '.join(main_parts)} | Stadtteil: {suburb}"
+
             frame = tk.Frame(self.content_frame, bg="white")
             frame.pack(fill="x", padx=20, pady=5)
-            tk.Label(
-                frame,
-                text=f"Ausgangskoordinate: {lat:.5f}, {lon:.5f} | {addr}",
-                font=("Arial", 12),
-                bg="white",
-                anchor="w",
-                wraplength=self.window_width * 2
-            ).pack(fill="x")
+            tk.Label(frame,
+                     text=text,
+                     font=("Arial", 12),
+                     bg="white",
+                     anchor="w",
+                     wraplength=self.window_width * 2)\
+                .pack(fill="x")
 
 # ----------------------------------------------------------- #
 # App starten                                                 #

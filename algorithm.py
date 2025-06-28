@@ -5,63 +5,92 @@ import requests
 import gpxpy
 from math import radians, cos, sin, asin, sqrt
 from datetime import timezone
+from typing import Dict, List, Tuple
 
 # --------------------------------------------------------------------------- #
-# Schwellenwerte (ggf. anpassen)
+# Schwellenwerte
 # --------------------------------------------------------------------------- #
 DIST_THRESHOLD_M      = 50      # Radius, um Punkte demselben Ort zuzuordnen
 MIN_STOP_DURATION_SEC = 180     # Mindestaufenthalt: 3 Minuten
-NOMINATIM_SLEEP_SEC   = 1       # Höfliche Pause zw. API-Aufrufen
+NOMINATIM_SLEEP_SEC   = 1       # Pause zw. API-Aufrufen, lt. OSM-Policy
 
 # --------------------------------------------------------------------------- #
-# Distanz-Funktion (Haversine)
+# Distanzfunktion (Haversine)
 # --------------------------------------------------------------------------- #
 def haversine(lat1, lon1, lat2, lon2):
-    """Entfernung zweier Lat/Lon-Paare in Metern (Großkreis, Haversine)."""
+    """Entfernung zweier Lat/Lon-Paare in Metern (Großkreis)."""
     lat1, lon1, lat2, lon2 = map(radians, (lat1, lon1, lat2, lon2))
     dlat, dlon = lat2 - lat1, lon2 - lon1
-    a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
+    a = sin(dlat / 2)**2 + cos(lat1) * cos(lat2) * sin(dlon / 2)**2
     return 6371000 * 2 * asin(sqrt(a))
 
 # --------------------------------------------------------------------------- #
-# Reverse-Geocoding (Nominatim) – einfacher Cache
+# Reverse-Geocoding (Nominatim)  ------------------------------------------- #
+#   Rückgabe: Dict mit name, road, house_number, postcode, city, suburb
 # --------------------------------------------------------------------------- #
-_GEOCACHE: dict[tuple[float, float], str] = {}
+_GEOCACHE: Dict[Tuple[float, float], Dict[str, str]] = {}
 _NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
 _NOMINATIM_HEADERS = {
-    "User-Agent": "WegeRadar/1.0 (kontakt@example.com)"      # ggf. anpassen
+    "User-Agent": "WegeRadar/1.0 (kontakt@example.com)"   # ggf. anpassen
 }
 
-def reverse_geocode(lat: float, lon: float) -> str:
-    """
-    Liefert für (lat, lon) eine menschen­lesbare Adresse.
-    Bei Fehlschlag → 'Adresse nicht gefunden'.
-    """
+def _extract_name(data: dict) -> str:
+    """Versucht, einen sinnvollen Ortsnamen aus der Nominatim-Antwort zu ziehen."""
+    if 'name' in data and data['name']:
+        return data['name']
+    address = data.get('address', {})
+    for key in ('amenity', 'attraction', 'leisure', 'shop', 'tourism'):
+        if address.get(key):
+            return address[key]
+    return ''  # leer = kein Name vorhanden
+
+def reverse_geocode(lat: float, lon: float) -> Dict[str, str]:
+    """Gibt Adress-Komponenten als Dict zurück (mit Cache & Rate-Limit)."""
     key = (round(lat, 5), round(lon, 5))   # ~1 m Genauigkeit
     if key in _GEOCACHE:
         return _GEOCACHE[key]
 
+    result = {
+        "name": "",
+        "road": "",
+        "house_number": "",
+        "postcode": "",
+        "city": "",
+        "suburb": ""
+    }
+
     try:
         resp = requests.get(
             _NOMINATIM_URL,
-            params={"format": "jsonv2", "lat": lat, "lon": lon, "zoom": 18},
+            params={"format": "jsonv2", "lat": lat, "lon": lon, "zoom": 18,
+                    "addressdetails": 1},
             headers=_NOMINATIM_HEADERS,
             timeout=5
         )
         if resp.status_code == 200:
             data = resp.json()
-            address = data.get("display_name") or "Adresse nicht gefunden"
-        else:
-            address = "Adresse nicht gefunden"
+            addr = data.get("address", {})
+            result.update({
+                "name":          _extract_name(data),
+                "road":          addr.get("road")          or addr.get("pedestrian") \
+                                 or addr.get("footway")    or "",
+                "house_number":  addr.get("house_number", ""),
+                "postcode":      addr.get("postcode", ""),
+                "city":          addr.get("city")   or addr.get("town") \
+                                 or addr.get("village") or addr.get("hamlet") or "",
+                "suburb":        addr.get("suburb") or addr.get("city_district") \
+                                 or addr.get("neighbourhood") or ""
+            })
     except Exception:
-        address = "Adresse nicht gefunden"
+        # Bei Fehlern einfach leere Strings lassen
+        pass
 
-    _GEOCACHE[key] = address
-    time.sleep(NOMINATIM_SLEEP_SEC)        # OSM-Policy: 1 s Pause
-    return address
+    _GEOCACHE[key] = result
+    time.sleep(NOMINATIM_SLEEP_SEC)        # OSM-Policy einhalten
+    return result
 
 # --------------------------------------------------------------------------- #
-# Dialog für Datumsauswahl (wird von GUI genutzt)
+# Dialog für Datumsauswahl  (von der GUI aufgerufen)
 # --------------------------------------------------------------------------- #
 def show_date_dialog(master, gpx_folder, last, first):
     prefix = f"{last}_{first}_"
@@ -69,11 +98,9 @@ def show_date_dialog(master, gpx_folder, last, first):
              if f.startswith(prefix) and f.lower().endswith('.gpx')]
     if not files:
         from tkinter import messagebox
-        messagebox.showinfo(
-            "WegeRadar",
-            f"Keine GPX-Dateien für {last}, {first} gefunden.",
-            parent=master
-        )
+        messagebox.showinfo("WegeRadar",
+                            f"Keine GPX-Dateien für {last}, {first} gefunden.",
+                            parent=master)
         return None
 
     date_map = {os.path.splitext(f)[0].split('_')[2]: f for f in files}
@@ -90,7 +117,6 @@ def show_date_dialog(master, gpx_folder, last, first):
     tk.Label(dlg, text="Bitte Datum wählen:", font=("Arial", 12)).pack(pady=10)
 
     selected = {"date": None}
-
     def choose(d):
         selected["date"] = d
         dlg.destroy()
@@ -108,23 +134,25 @@ def show_date_dialog(master, gpx_folder, last, first):
     return selected["date"]
 
 # --------------------------------------------------------------------------- #
-# Kernfunktion: Stay-Point-Analyse + Start/End immer dabei
+# Kernfunktion – Aufenthalte + Start/End  (liefert Dict pro Ort)
 # --------------------------------------------------------------------------- #
 def analyze_gpx(gpx_folder, last, first, date,
                 dist_m: int = DIST_THRESHOLD_M,
-                min_stop_sec: int = MIN_STOP_DURATION_SEC):
+                min_stop_sec: int = MIN_STOP_DURATION_SEC) -> List[dict]:
     """
-    Liefert eine Liste von Tripeln (lat, lon, adresse).
-
-    * Alle Aufenthaltsorte (≥ min_stop_sec innerhalb dist_m)
-    * Immer zusätzlich: exakter Start- und Endpunkt
+    Liefert eine Liste von Dicts, z.B.:
+      {
+        'lat': 49.01, 'lon': 8.40,
+        'name': 'Edeka', 'road': 'Hauptstraße', 'house_number': '15',
+        'postcode': '12345', 'city': 'Beispielstadt', 'suburb': 'Altstadt'
+      }
     """
     filename = f"{last}_{first}_{date}.gpx"
     path = os.path.join(gpx_folder, filename)
     if not os.path.exists(path):
         return []
 
-    # -------- GPX einlesen -------- #
+    # ---------------- GPX einlesen ---------------- #
     with open(path, encoding="utf-8") as f:
         gpx = gpxpy.parse(f)
 
@@ -136,10 +164,10 @@ def analyze_gpx(gpx_folder, last, first, date,
     if not pts:
         return []
 
-    pts.sort(key=lambda x: x[0])            # chronologisch
+    pts.sort(key=lambda x: x[0])           # chronologisch
 
-    # -------- Staypoints bestimmen -------- #
-    stay_points: list[tuple[float, float]] = []
+    # ---------------- Stay-Point-Detection -------- #
+    stay_points: List[Tuple[float, float]] = []
     i, n = 0, len(pts)
     while i < n:
         j = i + 1
@@ -156,19 +184,17 @@ def analyze_gpx(gpx_folder, last, first, date,
         else:
             i += 1
 
-    # -------- Start- & Endkoordinaten immer ergänzen -------- #
-    coords: list[tuple[float, float]] = []
-    start_lat, start_lon = pts[0][1], pts[0][2]
-    end_lat,   end_lon   = pts[-1][1], pts[-1][2]
-
-    coords.append((start_lat, start_lon))
+    # ---------------- Start/End ergänzen ---------- #
+    coords: List[Tuple[float, float]] = []
+    coords.append((pts[0][1], pts[0][2]))     # Startpunkt
     coords.extend(stay_points)
-    coords.append((end_lat, end_lon))
+    coords.append((pts[-1][1], pts[-1][2]))   # Endpunkt
 
-    # -------- Reverse-Geocoding -------- #
-    result: list[tuple[float, float, str]] = []
+    # ---------------- Reverse-Geocoding ----------- #
+    result: List[dict] = []
     for lat, lon in coords:
         addr = reverse_geocode(lat, lon)
-        result.append((lat, lon, addr))
+        addr.update({"lat": lat, "lon": lon})  # Koordinaten nur intern
+        result.append(addr)
 
     return result
