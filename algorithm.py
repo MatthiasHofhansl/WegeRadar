@@ -5,10 +5,10 @@ from datetime import timezone, datetime
 from typing import Dict, List, Tuple
 
 try:
-    from zoneinfo import ZoneInfo           # Python 3.9+
-except ImportError:                         # Fallback für ältere Versionen
+    from zoneinfo import ZoneInfo
+except ImportError:
     from datetime import timezone as ZoneInfo
-    ZoneInfo = lambda tz: timezone.utc      # nutzt dann UTC
+    ZoneInfo = lambda tz: timezone.utc
 
 import requests
 import gpxpy
@@ -16,18 +16,17 @@ import gpxpy
 # --------------------------------------------------------------------------- #
 # Schwellenwerte
 # --------------------------------------------------------------------------- #
-DIST_THRESHOLD_M      = 50      # Radius, um Punkte demselben Ort zuzuordnen
-MIN_STOP_DURATION_SEC = 180     # Mindestaufenthalt: 3 Minuten
-NOMINATIM_SLEEP_SEC   = 1       # Pause zw. API-Aufrufen (OSM-Policy)
+DIST_THRESHOLD_M      = 50
+MIN_STOP_DURATION_SEC = 180
+NOMINATIM_SLEEP_SEC   = 1
 
 # --------------------------------------------------------------------------- #
-# Distanzfunktion (Haversine)
+# Distanzfunktion
 # --------------------------------------------------------------------------- #
 def haversine(lat1, lon1, lat2, lon2):
-    """Entfernung zweier Lat/Lon-Paare in Metern (Großkreis)."""
     lat1, lon1, lat2, lon2 = map(radians, (lat1, lon1, lat2, lon2))
     dlat, dlon = lat2 - lat1, lon2 - lon1
-    a = sin(dlat / 2)**2 + cos(lat1) * cos(lat2) * sin(dlon / 2)**2
+    a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
     return 6371000 * 2 * asin(sqrt(a))
 
 # --------------------------------------------------------------------------- #
@@ -51,8 +50,7 @@ def reverse_geocode(lat: float, lon: float) -> Dict[str, str]:
     if key in _GEOCACHE:
         return _GEOCACHE[key]
 
-    result = {k: "" for k in
-              ("name", "road", "house_number", "postcode", "city")}
+    result = {k: "" for k in ("name", "road", "house_number", "postcode", "city")}
     try:
         r = requests.get(
             _NOMINATIM_URL,
@@ -60,10 +58,10 @@ def reverse_geocode(lat: float, lon: float) -> Dict[str, str]:
                     "zoom": 18, "addressdetails": 1},
             headers=_NOMINATIM_HEADERS, timeout=5)
         if r.status_code == 200:
-            data = r.json()
-            addr = data.get("address", {})
+            js = r.json()
+            addr = js.get("address", {})
             result.update({
-                "name":         _extract_name(data),
+                "name":         _extract_name(js),
                 "road":         addr.get("road") or addr.get("pedestrian")
                                 or addr.get("footway") or "",
                 "house_number": addr.get("house_number", ""),
@@ -79,7 +77,7 @@ def reverse_geocode(lat: float, lon: float) -> Dict[str, str]:
     return result
 
 # --------------------------------------------------------------------------- #
-# Datumsauswahl-Dialog (wird von der GUI aufgerufen)
+# Datumsauswahl-Dialog – jetzt größer & zentriert
 # --------------------------------------------------------------------------- #
 def show_date_dialog(master, gpx_folder, last, first):
     prefix = f"{last}_{first}_"
@@ -104,23 +102,33 @@ def show_date_dialog(master, gpx_folder, last, first):
     dlg.grab_set()
 
     tk.Label(dlg, text="Bitte Datum wählen:", font=("Arial", 12)).pack(pady=10)
+
     sel = {"d": None}
     def choose(d): sel["d"] = d; dlg.destroy()
     for d in sorted(date_map):
-        tk.Button(dlg, text=d, width=20,
+        tk.Button(dlg, text=d, width=22,  # etwas breiter
                   command=lambda d=d: choose(d)).pack(pady=2)
+
+    # Größe und Position anpassen
+    dlg.update_idletasks()
+    w, h = dlg.winfo_width() + 40, dlg.winfo_height() + 20  # etwas größer
+    screen_w = dlg.winfo_screenwidth()
+    screen_h = dlg.winfo_screenheight()
+    x = (screen_w - w) // 2
+    y = (screen_h - h) // 2
+    dlg.geometry(f"{w}x{h}+{x}+{y}")
+
     dlg.wait_window()
     return sel["d"]
 
 # --------------------------------------------------------------------------- #
-# Kernfunktion – Orte + erster Zeitstempel
+# Kernfunktion – unverändert (liefert Orte + Zeitstempel)
 # --------------------------------------------------------------------------- #
 BERLIN = ZoneInfo("Europe/Berlin")
 
 def analyze_gpx(gpx_folder, last, first, date,
                 dist_m=DIST_THRESHOLD_M,
                 min_stop_sec=MIN_STOP_DURATION_SEC) -> List[dict]:
-    """Gibt pro Ort Koordinaten, Adresse + ersten Zeitstempel (Berliner Zeit)."""
     filename = f"{last}_{first}_{date}.gpx"
     path = os.path.join(gpx_folder, filename)
     if not os.path.exists(path):
@@ -130,15 +138,13 @@ def analyze_gpx(gpx_folder, last, first, date,
         gpx = gpxpy.parse(f)
 
     pts = [(pt.time.replace(tzinfo=timezone.utc), pt.latitude, pt.longitude)
-           for trk in gpx.tracks
-           for seg in trk.segments
-           for pt in seg.points if pt.time]
+           for trk in gpx.tracks for seg in trk.segments for pt in seg.points
+           if pt.time]
     if not pts:
         return []
 
     pts.sort(key=lambda x: x[0])
 
-    # ----- Aufenthaltsorte bestimmen --------------------------------------- #
     clusters: List[Tuple[float, float, datetime]] = []
     i, n = 0, len(pts)
     while i < n:
@@ -149,23 +155,23 @@ def analyze_gpx(gpx_folder, last, first, date,
         if (pts[j-1][0] - pts[i][0]).total_seconds() >= min_stop_sec:
             lat = sum(p[1] for p in pts[i:j]) / (j - i)
             lon = sum(p[2] for p in pts[i:j]) / (j - i)
-            clusters.append((lat, lon, pts[i][0]))  # Startzeit
+            clusters.append((lat, lon, pts[i][0]))
             i = j
         else:
             i += 1
 
     coords = [
-        (pts[0][1],  pts[0][2],  pts[0][0]),   # Startpunkt
+        (pts[0][1],  pts[0][2],  pts[0][0]),
         *clusters,
-        (pts[-1][1], pts[-1][2], pts[-1][0])   # Endpunkt
+        (pts[-1][1], pts[-1][2], pts[-1][0])
     ]
 
     result = []
     for lat, lon, start_dt in coords:
         addr = reverse_geocode(lat, lon)
         addr.update({
-            "lat":      lat,
-            "lon":      lon,
+            "lat": lat,
+            "lon": lon,
             "start_dt": start_dt.astimezone(BERLIN)
         })
         result.append(addr)
