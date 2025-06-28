@@ -2,110 +2,158 @@
 algorithm.py
 ============
 
-Erkennt Aufenthalts-Orte und liefert zu jedem Ort:
+Erkennt Aufenthalts-Orte in einer GPX-Spur, verschmilzt benachbarte Stops
+nach festen Regeln und reichert sie mit Adressdaten an.
 
-    • Koordinaten (lat, lon)
-    • start_dt, end_dt   (Europe/Berlin)
-    • Name, Straße, Hausnr., PLZ, Stadt
+Für jeden Aufenthalt speichert das Skript:
+    • Koordinaten lat / lon
+    • Start- und End-Zeit (Europe/Berlin)
+    • Name, Straße, Haus-Nr., PLZ, Stadt (per Nominatim)
 
-Zusammenfassung der Aufenthalte
--------------------------------
-1. Ort-Übergang in derselben Minute → verschmelzen (Endzeit wird erweitert).
-2. Direkt aufeinanderfolgende Orte verschmelzen, wenn
-      • Adresse *vollständig identisch* **oder**
-      • Distanz ≤ 75 m
-   und die Zeitlücke ≤ 10 Minuten ist.
-
-Für jede Weg-Etappe wird zusätzlich gespeichert:
-    • next_dist_km_real         (Kilometer, GPX-Spur)
-    • next_speed_kmh_real       (Kilometer pro Stunde)
+Für jede Weg-Etappe (Stop i  →  Stop i+1):
+    • next_dist_km_real      (Distanz entlang der GPX-Punkte)
+    • next_speed_kmh_real    (Durchschnittsgeschwindigkeit)
 """
 
 from __future__ import annotations
 
-import os, time, requests, gpxpy
+import os
+import time
+from datetime import datetime, timezone
 from math import radians, cos, sin, asin, sqrt
-from datetime import timezone, datetime
 from typing import Dict, List, Tuple
 
+import gpxpy
+import requests
+
+# --------------------------------------------------------------------------- #
+# Zeitzone
+# --------------------------------------------------------------------------- #
 try:
-    from zoneinfo import ZoneInfo
-except ImportError:                                # Python < 3.9
-    from datetime import timezone as ZoneInfo      # type: ignore
-    ZoneInfo = lambda tz: timezone.utc             # type: ignore
+    from zoneinfo import ZoneInfo           # Py ≥ 3.9
+except ImportError:                         # Py 3.8
+    from datetime import timezone as ZoneInfo  # type: ignore
+    ZoneInfo = lambda tz: timezone.utc         # type: ignore
+
+BERLIN = ZoneInfo("Europe/Berlin")
 
 # --------------------------------------------------------------------------- #
 # Parameter
 # --------------------------------------------------------------------------- #
-DIST_THRESHOLD_M       = 50          # Radius für Stop-Cluster-Bildung
-MIN_STOP_DURATION_SEC  = 180
-NOMINATIM_SLEEP_SEC    = 1
-MAX_GAP_SEC_SAME_ADDR  = 10 * 60     # 10 Minuten
-MERGE_DIST_M           = 75          # 75 m
-# --------------------------------------------------------------------------- #
+DIST_THRESHOLD_M       = 50           # Radius für das erste Stop-Clustering
+MIN_STOP_DURATION_SEC  = 180          # Mindest­aufenthaltsdauer (3 min)
+NOMINATIM_SLEEP_SEC    = 1            # Wartezeit pro Geocode-Request
+MAX_GAP_SEC_SAME_ADDR  = 10 * 60      # Max. Lücke zw. identischen Stops (10 min)
 
+MERGE_DIST_M           = 150          # *** Neuer Radius für Punkt 6 ***
+
+
+# --------------------------------------------------------------------------- #
+# Hilfsfunktionen
+# --------------------------------------------------------------------------- #
 def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Meter‐Distanz (Großkreis) zwischen zwei Koordinaten."""
+    """Großkreis-Distanz in Metern zwischen zwei Koordinaten."""
     lat1, lon1, lat2, lon2 = map(radians, (lat1, lon1, lat2, lon2))
     dlat, dlon = lat2 - lat1, lon2 - lon1
-    a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
+    a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
     return 6371000 * 2 * asin(sqrt(a))
 
+
+# --------------------------------------------------------------------------- #
+# Reverse-Geocoding mit Cache
+# --------------------------------------------------------------------------- #
+_NOMINATIM    = "https://nominatim.openstreetmap.org/reverse"
+_HDRS         = {"User-Agent": "WegeRadar/1.0 (kontakt@example.com)"}
 _GEOCACHE: Dict[Tuple[float, float], Dict[str, str]] = {}
-_NOMINATIM = "https://nominatim.openstreetmap.org/reverse"
-_HDRS      = {"User-Agent": "WegeRadar/1.0 (kontakt@example.com)"}
+
 
 def _extract_name(js: dict) -> str:
+    """Versuche, einen treffenden Ortsnamen aus dem Nominatim-JSON zu holen."""
     if js.get("name"):
         return js["name"]
+
     addr = js.get("address", {})
-    for k in ("amenity", "attraction", "leisure", "shop", "tourism"):
-        if addr.get(k):
-            return addr[k]
+    for key in ("amenity", "attraction", "leisure", "shop", "tourism"):
+        if addr.get(key):
+            return addr[key]
     return ""
 
+
 def reverse_geocode(lat: float, lon: float) -> Dict[str, str]:
-    """Liefert Address-Dict (mit Cache & Rate-Limit)."""
-    key = (round(lat, 5), round(lon, 5))
+    """
+    Liefert ein kleines Adress-Dict für die Koordinate.
+    Greift erst in den Cache, dann – geregelt – zu Nominatim.
+    """
+    key = (round(lat, 5), round(lon, 5))   # 1 m Genauigkeit ≈ 5 Decimales
     if key in _GEOCACHE:
         return _GEOCACHE[key]
 
-    res = {k: "" for k in ("name", "road", "house_number", "postcode", "city")}
+    result = {k: "" for k in ("name", "road", "house_number", "postcode", "city")}
     try:
         r = requests.get(
             _NOMINATIM,
-            params={"format":"jsonv2","lat":lat,"lon":lon,
-                    "zoom":18,"addressdetails":1},
-            headers=_HDRS, timeout=5
+            params={
+                "format": "jsonv2",
+                "lat": lat,
+                "lon": lon,
+                "zoom": 18,
+                "addressdetails": 1,
+            },
+            headers=_HDRS,
+            timeout=5,
         )
         if r.status_code == 200:
-            js   = r.json()
+            js = r.json()
             addr = js.get("address", {})
-            res.update({
-                "name":         _extract_name(js),
-                "road":         addr.get("road") or addr.get("pedestrian")
-                                or addr.get("footway") or "",
-                "house_number": addr.get("house_number", ""),
-                "postcode":     addr.get("postcode", ""),
-                "city":         addr.get("city") or addr.get("town")
-                                or addr.get("village") or addr.get("hamlet") or ""
-            })
+            result.update(
+                {
+                    "name": _extract_name(js),
+                    "road": addr.get("road")
+                    or addr.get("pedestrian")
+                    or addr.get("footway")
+                    or "",
+                    "house_number": addr.get("house_number", ""),
+                    "postcode": addr.get("postcode", ""),
+                    "city": addr.get("city")
+                    or addr.get("town")
+                    or addr.get("village")
+                    or addr.get("hamlet")
+                    or "",
+                }
+            )
     except Exception:
-        pass
+        pass  # Netzwerkfehler ignorieren
 
-    _GEOCACHE[key] = res
+    _GEOCACHE[key] = result
     time.sleep(NOMINATIM_SLEEP_SEC)
-    return res
+    return result
+
+
+def _same_address(a: dict, b: dict) -> bool:
+    """True, wenn alle Adressfelder exakt gleich sind."""
+    for fld in ("name", "road", "house_number", "postcode", "city"):
+        if a.get(fld, "") != b.get(fld, ""):
+            return False
+    return True
+
 
 # --------------------------------------------------------------------------- #
-# Dialog zur Datumsauswahl
+# Dateiauswahl-Dialog (GUI-Hilfsfunktion)
 # --------------------------------------------------------------------------- #
 def show_date_dialog(master, gpx_folder: str, last: str, first: str) -> str | None:
+    """
+    Zeigt einen kleinen Dialog: Für die Person (Nachname, Vorname) existieren
+    evtl. mehrere Dateien – der/die Nutzer*in wählt ein Datum.
+    """
     prefix = f"{last}_{first}_"
-    files  = [f for f in os.listdir(gpx_folder)
-              if f.startswith(prefix) and f.lower().endswith(".gpx")]
+    files = [
+        f
+        for f in os.listdir(gpx_folder)
+        if f.startswith(prefix) and f.lower().endswith(".gpx")
+    ]
     if not files:
         from tkinter import messagebox
+
         messagebox.showinfo(
             "WegeRadar",
             f"Keine GPX-Dateien für {last}, {first} gefunden.",
@@ -118,36 +166,35 @@ def show_date_dialog(master, gpx_folder: str, last: str, first: str) -> str | No
         return next(iter(date_map))
 
     import tkinter as tk
-    dlg = tk.Toplevel(master); dlg.title("GPX-Datei auswählen")
-    dlg.resizable(False, False); dlg.transient(master); dlg.grab_set()
+
+    dlg = tk.Toplevel(master)
+    dlg.title("GPX-Datei auswählen")
+    dlg.resizable(False, False)
+    dlg.transient(master)
+    dlg.grab_set()
 
     tk.Label(dlg, text="Bitte Datum wählen:", font=("Arial", 12)).pack(pady=10)
     sel: dict[str | None] = {"d": None}
-    def choose(d: str): sel["d"] = d; dlg.destroy()
+
+    def choose(d: str):
+        sel["d"] = d
+        dlg.destroy()
+
     for d in sorted(date_map):
         tk.Button(dlg, text=d, width=22, command=lambda d=d: choose(d)).pack(pady=2)
 
     dlg.update_idletasks()
-    w, h = dlg.winfo_width()+40, dlg.winfo_height()+20
-    x = (dlg.winfo_screenwidth()-w)//2
-    y = (dlg.winfo_screenheight()-h)//2
+    w, h = dlg.winfo_width() + 40, dlg.winfo_height() + 20
+    x = (dlg.winfo_screenwidth() - w) // 2
+    y = (dlg.winfo_screenheight() - h) // 2
     dlg.geometry(f"{w}x{h}+{x}+{y}")
     dlg.wait_window()
     return sel["d"]
 
+
 # --------------------------------------------------------------------------- #
-# Hauptfunktion
+# Hauptfunktion – Analyse und Aufbereitung der Stops
 # --------------------------------------------------------------------------- #
-BERLIN = ZoneInfo("Europe/Berlin")
-
-def _same_address(a: dict, b: dict) -> bool:
-    """True, wenn alle Adressfelder exakt übereinstimmen."""
-    for fld in ("name", "road", "house_number", "postcode", "city"):
-        if a.get(fld, "") != b.get(fld, ""):
-            return False
-    return True
-
-
 def analyze_gpx(
     gpx_folder: str,
     last: str,
@@ -157,9 +204,9 @@ def analyze_gpx(
     min_stop_sec: int = MIN_STOP_DURATION_SEC,
 ) -> List[dict]:
     """
-    Analysiert GPX, verschmilzt Orte nach den o. g. Regeln und ergänzt:
-        • next_dist_km_real
-        • next_speed_kmh_real
+    Haupteinstieg: Liest die Datei <last>_<first>_<date>.gpx ein,
+    erzeugt Aufenthaltsorte, verschmilzt sie und ergänzt
+    Distanz / Geschwindigkeit zur jeweils folgenden Etappe.
     """
     path = os.path.join(gpx_folder, f"{last}_{first}_{date}.gpx")
     if not os.path.exists(path):
@@ -173,7 +220,7 @@ def analyze_gpx(
         (pt.time.replace(tzinfo=timezone.utc), pt.latitude, pt.longitude)
         for trk in gpx.tracks
         for seg in trk.segments
-        for pt  in seg.points
+        for pt in seg.points
         if pt.time
     ]
     if not pts:
@@ -181,52 +228,69 @@ def analyze_gpx(
 
     pts.sort(key=lambda x: x[0])
 
-    # ---- Aufenthalts-Cluster bilden -------------------------------------- #
+    # --------------------------------------------------------------------- #
+    # 1. Stop-Cluster erkennen (Radius DIST_THRESHOLD_M, Dauer >= min_stop)
+    # --------------------------------------------------------------------- #
     clusters: List[Tuple[float, float, datetime, datetime]] = []
     i, n = 0, len(pts)
     while i < n:
         j = i + 1
-        while j < n and haversine(pts[i][1], pts[i][2],
-                                  pts[j][1], pts[j][2]) <= dist_m:
+        # solange Punkte im Umkreis
+        while j < n and haversine(
+            pts[i][1], pts[i][2], pts[j][1], pts[j][2]
+        ) <= dist_m:
             j += 1
-        if (pts[j-1][0] - pts[i][0]).total_seconds() >= min_stop_sec:
-            lat  = sum(p[1] for p in pts[i:j]) / (j - i)
-            lon  = sum(p[2] for p in pts[i:j]) / (j - i)
-            clusters.append((lat, lon, pts[i][0], pts[j-1][0]))
+
+        duration = (pts[j - 1][0] - pts[i][0]).total_seconds()
+        if duration >= min_stop_sec:
+            lat = sum(p[1] for p in pts[i:j]) / (j - i)
+            lon = sum(p[2] for p in pts[i:j]) / (j - i)
+            clusters.append((lat, lon, pts[i][0], pts[j - 1][0]))
             i = j
         else:
             i += 1
 
+    # Immer Start- und End-Punkt mit aufnehmen
     coords: List[Tuple[float, float, datetime, datetime]] = [
-        (pts[0][1],  pts[0][2],  pts[0][0],  pts[0][0]),
+        (pts[0][1], pts[0][2], pts[0][0], pts[0][0]),
         *clusters,
-        (pts[-1][1], pts[-1][2], pts[-1][0], pts[-1][0])
+        (pts[-1][1], pts[-1][2], pts[-1][0], pts[-1][0]),
     ]
 
-    # ---- 1. Minute-Überlappung verschmelzen ------------------------------ #
-    tmp: List[Tuple[float, float, datetime, datetime]] = []
+    # --------------------------------------------------------------------- #
+    # 2. Stops, die in derselben Minute ineinander übergehen, verschmelzen
+    # --------------------------------------------------------------------- #
+    merged: List[Tuple[float, float, datetime, datetime]] = []
     for lat, lon, s_dt, e_dt in coords:
-        if not tmp:
-            tmp.append((lat, lon, s_dt, e_dt))
-            continue
-        p_lat, p_lon, p_s, p_e = tmp[-1]
-        if p_e.strftime("%Y-%m-%d %H:%M") == s_dt.strftime("%Y-%m-%d %H:%M"):
-            tmp[-1] = (p_lat, p_lon, p_s, e_dt)
+        if (
+            merged
+            and merged[-1][3].strftime("%Y-%m-%d %H:%M")
+            == s_dt.strftime("%Y-%m-%d %H:%M")
+        ):
+            # End-Zeit des letzten Stops erweitern
+            merged[-1] = (merged[-1][0], merged[-1][1], merged[-1][2], e_dt)
         else:
-            tmp.append((lat, lon, s_dt, e_dt))
+            merged.append((lat, lon, s_dt, e_dt))
 
-    # ---- Reverse-Geocode ------------------------------------------------- #
+    # --------------------------------------------------------------------- #
+    # 3. Adressen holen
+    # --------------------------------------------------------------------- #
     enriched: List[dict] = []
-    for lat, lon, s_dt, e_dt in tmp:
+    for lat, lon, s_dt, e_dt in merged:
         addr = reverse_geocode(lat, lon)
-        addr.update({
-            "lat": lat, "lon": lon,
-            "start_dt": s_dt.astimezone(BERLIN),
-            "end_dt":   e_dt.astimezone(BERLIN)
-        })
+        addr.update(
+            {
+                "lat": lat,
+                "lon": lon,
+                "start_dt": s_dt.astimezone(BERLIN),
+                "end_dt": e_dt.astimezone(BERLIN),
+            }
+        )
         enriched.append(addr)
 
-    # ---- 2. Adresse/Distanz/Gap-Regel verschmelzen ----------------------- #
+    # --------------------------------------------------------------------- #
+    # 4. Adress-/Distanz-Merging nach Punkt 6 der Beschreibung
+    # --------------------------------------------------------------------- #
     final: List[dict] = []
     for item in enriched:
         if not final:
@@ -237,44 +301,45 @@ def analyze_gpx(
         gap_sec = (item["start_dt"] - prev["end_dt"]).total_seconds()
 
         same_addr = _same_address(prev, item)
-        dist_ok   = haversine(prev["lat"], prev["lon"], item["lat"], item["lon"]) <= MERGE_DIST_M
+        close_enough = (
+            haversine(prev["lat"], prev["lon"], item["lat"], item["lon"]) <= MERGE_DIST_M
+        )
 
-        if gap_sec <= MAX_GAP_SEC_SAME_ADDR and (same_addr or dist_ok):
-            prev["end_dt"] = item["end_dt"]          # Endzeit erweitern
+        if gap_sec <= MAX_GAP_SEC_SAME_ADDR and (same_addr or close_enough):
+            # Zusammenlegen: End-Zeit verlängern
+            prev["end_dt"] = item["end_dt"]
         else:
             final.append(item)
 
-    # ---- Distanz & Geschwindigkeit je Weg -------------------------------- #
-    utc_secs = [
-        (
-            s["end_dt"].astimezone(timezone.utc),
-            n["start_dt"].astimezone(timezone.utc),
-        )
-        for s, n in zip(final[:-1], final[1:])
-    ]
+    # --------------------------------------------------------------------- #
+    # 5. Distanz & Tempo zwischen je zwei Stops bestimmen
+    # --------------------------------------------------------------------- #
+    for idx in range(len(final) - 1):
+        end_prev_utc   = final[idx]["end_dt"].astimezone(timezone.utc)
+        start_next_utc = final[idx + 1]["start_dt"].astimezone(timezone.utc)
 
-    for idx, (t_end_prev, t_start_next) in enumerate(utc_secs):
+        # Distanz entlang der GPX-Spur akkumulieren
         dist_m_real = 0.0
-        acc = False
+        started = False
         for i in range(len(pts) - 1):
             t0, lat0, lon0 = pts[i]
             t1, lat1, lon1 = pts[i + 1]
 
-            if t1 < t_end_prev:
+            if t1 < end_prev_utc:
                 continue
-            if not acc and t0 >= t_end_prev:
-                acc = True
-            if acc:
+            if not started and t0 >= end_prev_utc:
+                started = True
+            if started:
                 dist_m_real += haversine(lat0, lon0, lat1, lon1)
-            if acc and t1 >= t_start_next:
+            if started and t1 >= start_next_utc:
                 break
 
-        dist_km = dist_m_real / 1000.0
-        time_h  = (t_start_next - t_end_prev).total_seconds() / 3600
-        speed_kmh = dist_km / time_h if time_h > 0 else None
+        dist_km = round(dist_m_real / 1000.0, 2)
+        time_h = (start_next_utc - end_prev_utc).total_seconds() / 3600
+        speed_kmh = round(dist_km / time_h, 2) if time_h > 0 else None
 
-        final[idx]["next_dist_km_real"]  = round(dist_km, 2)
+        final[idx]["next_dist_km_real"] = dist_km
         if speed_kmh is not None:
-            final[idx]["next_speed_kmh_real"] = round(speed_kmh, 2)
+            final[idx]["next_speed_kmh_real"] = speed_kmh
 
     return final
