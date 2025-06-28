@@ -13,8 +13,8 @@ class WegeRadar:
         self.master = master
         master.title(APP_NAME)
 
-        # → kompaktere Fensterhöhe
-        win_w, win_h = 500, 450
+        # kompakteres Startfenster (kleiner)
+        win_w, win_h = 500, 380
         self.window_width = win_w
         screen_w = master.winfo_screenwidth()
         screen_h = master.winfo_screenheight()
@@ -30,10 +30,10 @@ class WegeRadar:
 
     # ------------------------------------------------------- #
     def setup_ui(self):
-        # Überschrift
+        # Überschrift – mittig
         tk.Label(self.master, text="Herzlich Willkommen!",
                  font=("Arial", 24, "bold"))\
-            .pack(pady=(20, 5), anchor="w", padx=20)
+            .pack(pady=(20, 5))
 
         # ---------- GPX-Ordner ---------- #
         gpx_frame = tk.Frame(self.master)
@@ -45,23 +45,16 @@ class WegeRadar:
 
         tk.Button(gpx_frame, text="Auswählen", width=12,
                   command=self.select_gpx)\
-            .grid(row=1, column=0, sticky="w", pady=5)
+            .grid(row=1, column=0, sticky="w", pady=3)
 
         self.gpx_label = tk.Label(gpx_frame, text="Kein Ordner ausgewählt",
                                   font=("Arial", 12), width=25, anchor="w")
-        self.gpx_label.grid(row=1, column=1, padx=10, pady=5, sticky="w")
+        self.gpx_label.grid(row=1, column=1, padx=10, pady=3, sticky="w")
 
-        # Hinweis
-        tk.Label(self.master,
-                 text="(GPX-Ordner ist notwendig.)",
-                 font=("Arial", 10), fg="gray",
-                 wraplength=self.window_width - 40, justify="left")\
-            .pack(fill="x", padx=20, pady=(0, 10), anchor="w")
-
-        # Start-Button
+        # Start-Button (direkt unten, weniger Abstand)
         tk.Button(self.master, text="Start", command=self.start_action,
                   font=("Arial", 24, "bold"), height=2)\
-            .pack(side="bottom", fill="x")
+            .pack(side="bottom", fill="x", pady=(5, 0))
 
     # ------------------------------------------------------- #
     def select_gpx(self):
@@ -77,7 +70,7 @@ class WegeRadar:
                                    parent=self.master)
             return
 
-        # alte Widgets entfernen
+        # Hauptansicht vorbereiten
         for w in self.master.winfo_children():
             w.destroy()
         self.master.configure(bg="white")
@@ -94,8 +87,10 @@ class WegeRadar:
         scrollbar = tk.Scrollbar(container, orient="vertical",
                                  command=canvas.yview)
         scroll_frame = tk.Frame(canvas, bg="white")
-        scroll_frame.bind("<Configure>",
-                          lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        scroll_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
         canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
         canvas.pack(side="left", fill="y", expand=True)
@@ -111,7 +106,6 @@ class WegeRadar:
                  font=("Arial", 14, "bold"), bg="white", justify="center")\
             .pack(pady=(10, 5))
 
-        # Teilnehmer aus Dateinamen
         files = [f for f in os.listdir(self.gpx_path)
                  if f.lower().endswith(".gpx")]
         names = sorted({(f.split("_")[0], f.split("_")[1]) for f in files
