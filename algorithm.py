@@ -8,24 +8,24 @@ Erkennt Aufenthalts-Orte und liefert zu jedem Ort:
     • start_dt, end_dt   (Europe/Berlin)
     • Name, Straße, Hausnr., PLZ, Stadt
 
-Regeln zum Zusammenfassen:
+Zusammenfassung der Aufenthalte
+-------------------------------
 1. Ort-Übergang in derselben Minute → verschmelzen (Endzeit wird erweitert).
-2. Direkt aufeinanderfolgende Orte mit IDENTISCHER Adresse und
-   Zeitlücke ≤ 10 Minuten → verschmelzen (Endzeit wird erweitert).
+2. Direkt aufeinanderfolgende Orte verschmelzen, wenn
+      • Adresse *vollständig identisch* **oder**
+      • Distanz ≤ 75 m
+   und die Zeitlücke ≤ 10 Minuten ist.
 
-Neu:
-----  
-Für jede Weg-Etappe wird zusätzlich  
-    • next_dist_km_real         (Kilometer, GPX-Spur)  
-    • next_speed_kmh_real       (Kilometer pro Stunde)  
-gespeichert.
+Für jede Weg-Etappe wird zusätzlich gespeichert:
+    • next_dist_km_real         (Kilometer, GPX-Spur)
+    • next_speed_kmh_real       (Kilometer pro Stunde)
 """
 
 from __future__ import annotations
 
 import os, time, requests, gpxpy
 from math import radians, cos, sin, asin, sqrt
-from datetime import timezone, datetime, timedelta
+from datetime import timezone, datetime
 from typing import Dict, List, Tuple
 
 try:
@@ -37,16 +37,15 @@ except ImportError:                                # Python < 3.9
 # --------------------------------------------------------------------------- #
 # Parameter
 # --------------------------------------------------------------------------- #
-DIST_THRESHOLD_M      = 50
-MIN_STOP_DURATION_SEC = 180
-NOMINATIM_SLEEP_SEC   = 1
-MAX_GAP_SEC_SAME_ADDR = 10 * 60        # 10 Minuten
+DIST_THRESHOLD_M       = 50          # Radius für Stop-Cluster-Bildung
+MIN_STOP_DURATION_SEC  = 180
+NOMINATIM_SLEEP_SEC    = 1
+MAX_GAP_SEC_SAME_ADDR  = 10 * 60     # 10 Minuten
+MERGE_DIST_M           = 75          # 75 m
+# --------------------------------------------------------------------------- #
 
-# --------------------------------------------------------------------------- #
-# Hilfsfunktionen
-# --------------------------------------------------------------------------- #
 def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Meter-Distanz (Großkreis) zwischen zwei Koordinaten."""
+    """Meter‐Distanz (Großkreis) zwischen zwei Koordinaten."""
     lat1, lon1, lat2, lon2 = map(radians, (lat1, lon1, lat2, lon2))
     dlat, dlon = lat2 - lat1, lon2 - lon1
     a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
@@ -142,7 +141,7 @@ def show_date_dialog(master, gpx_folder: str, last: str, first: str) -> str | No
 BERLIN = ZoneInfo("Europe/Berlin")
 
 def _same_address(a: dict, b: dict) -> bool:
-    """Vergleicht Adresse exakt über alle Felder."""
+    """True, wenn alle Adressfelder exakt übereinstimmen."""
     for fld in ("name", "road", "house_number", "postcode", "city"):
         if a.get(fld, "") != b.get(fld, ""):
             return False
@@ -158,9 +157,9 @@ def analyze_gpx(
     min_stop_sec: int = MIN_STOP_DURATION_SEC,
 ) -> List[dict]:
     """
-    Analysiert GPX, verschmilzt Orte nach beiden Regeln und ergänzt pro Aufenthalt:
-        • next_dist_km_real       (Distanz zum nächsten Ort)
-        • next_speed_kmh_real     (ø Geschwindigkeit auf dieser Weg-Etappe)
+    Analysiert GPX, verschmilzt Orte nach den o. g. Regeln und ergänzt:
+        • next_dist_km_real
+        • next_speed_kmh_real
     """
     path = os.path.join(gpx_folder, f"{last}_{first}_{date}.gpx")
     if not os.path.exists(path):
@@ -182,7 +181,7 @@ def analyze_gpx(
 
     pts.sort(key=lambda x: x[0])
 
-    # ---- Cluster bilden -------------------------------------------------- #
+    # ---- Aufenthalts-Cluster bilden -------------------------------------- #
     clusters: List[Tuple[float, float, datetime, datetime]] = []
     i, n = 0, len(pts)
     while i < n:
@@ -204,7 +203,7 @@ def analyze_gpx(
         (pts[-1][1], pts[-1][2], pts[-1][0], pts[-1][0])
     ]
 
-    # ---- 1. Regel: Minute-Überlappung verschmelzen ----------------------- #
+    # ---- 1. Minute-Überlappung verschmelzen ------------------------------ #
     tmp: List[Tuple[float, float, datetime, datetime]] = []
     for lat, lon, s_dt, e_dt in coords:
         if not tmp:
@@ -216,7 +215,7 @@ def analyze_gpx(
         else:
             tmp.append((lat, lon, s_dt, e_dt))
 
-    # ---- Reverse-Geocode jedes tmp-Elements ----------------------------- #
+    # ---- Reverse-Geocode ------------------------------------------------- #
     enriched: List[dict] = []
     for lat, lon, s_dt, e_dt in tmp:
         addr = reverse_geocode(lat, lon)
@@ -227,7 +226,7 @@ def analyze_gpx(
         })
         enriched.append(addr)
 
-    # ---- 2. Regel: Gleiche Adresse + ≤10 min Lücke verschmelzen ---------- #
+    # ---- 2. Adresse/Distanz/Gap-Regel verschmelzen ----------------------- #
     final: List[dict] = []
     for item in enriched:
         if not final:
@@ -236,15 +235,17 @@ def analyze_gpx(
 
         prev = final[-1]
         gap_sec = (item["start_dt"] - prev["end_dt"]).total_seconds()
-        if gap_sec <= MAX_GAP_SEC_SAME_ADDR and _same_address(prev, item):
+
+        same_addr = _same_address(prev, item)
+        dist_ok   = haversine(prev["lat"], prev["lon"], item["lat"], item["lon"]) <= MERGE_DIST_M
+
+        if gap_sec <= MAX_GAP_SEC_SAME_ADDR and (same_addr or dist_ok):
             prev["end_dt"] = item["end_dt"]          # Endzeit erweitern
         else:
             final.append(item)
 
-    # --------------------------------------------------------------------- #
-    # Distanz + ø Geschwindigkeit für jedes Weg-Segment (final[i] → final[i+1])
-    # --------------------------------------------------------------------- #
-    utc_start_end = [
+    # ---- Distanz & Geschwindigkeit je Weg -------------------------------- #
+    utc_secs = [
         (
             s["end_dt"].astimezone(timezone.utc),
             n["start_dt"].astimezone(timezone.utc),
@@ -252,8 +253,7 @@ def analyze_gpx(
         for s, n in zip(final[:-1], final[1:])
     ]
 
-    for seg_idx, (t_end_prev, t_start_next) in enumerate(utc_start_end):
-        # Distanz summieren
+    for idx, (t_end_prev, t_start_next) in enumerate(utc_secs):
         dist_m_real = 0.0
         acc = False
         for i in range(len(pts) - 1):
@@ -273,8 +273,8 @@ def analyze_gpx(
         time_h  = (t_start_next - t_end_prev).total_seconds() / 3600
         speed_kmh = dist_km / time_h if time_h > 0 else None
 
-        final[seg_idx]["next_dist_km_real"]  = round(dist_km, 2)
+        final[idx]["next_dist_km_real"]  = round(dist_km, 2)
         if speed_kmh is not None:
-            final[seg_idx]["next_speed_kmh_real"] = round(speed_kmh, 2)
+            final[idx]["next_speed_kmh_real"] = round(speed_kmh, 2)
 
     return final
