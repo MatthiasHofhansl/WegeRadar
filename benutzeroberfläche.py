@@ -4,7 +4,7 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import importlib
-import algorithm  # Modul wird beim Start geladen
+import algorithm
 
 APP_NAME = "WegeRadar"
 
@@ -17,19 +17,17 @@ class WegeRadar:
         self.window_width = win_w
         screen_w = master.winfo_screenwidth()
         screen_h = master.winfo_screenheight()
-        x = (screen_w - win_w) // 2
-        y = (screen_h - win_h) // 2
+        x = (screen_w - win_w)//2
+        y = (screen_h - win_h)//2
         master.geometry(f"{win_w}x{win_h}+{x}+{y}")
         master.resizable(True, True)
 
+        self.content_frame = None
         self.excel_path = None
         self.gpx_path = None
-        self.content_frame = None
 
         self.setup_ui()
 
-    # ------------------------------------------------------- #
-    # Grund-UI
     # ------------------------------------------------------- #
     def setup_ui(self):
         tk.Label(self.master, text="Herzlich Willkommen!",
@@ -38,34 +36,29 @@ class WegeRadar:
         frame = tk.Frame(self.master)
         frame.pack(pady=10)
 
-        # Excel (optional)
         tk.Label(frame, text="Excel-Datei (optional):",
                  font=("Arial", 12)).grid(row=0, column=0, columnspan=2,
                                           sticky="w", padx=5)
         tk.Button(frame, text="Auswählen",
                   command=self.select_excel, width=12).grid(row=1, column=0,
                                                             padx=5, pady=5)
-        self.excel_label_selected = tk.Label(frame, text="Keine Datei ausgewählt",
-                                             font=("Arial", 12), width=20,
-                                             anchor="w")
-        self.excel_label_selected.grid(row=1, column=1, padx=5, pady=5)
+        self.excel_label = tk.Label(frame, text="Keine Datei ausgewählt",
+                                    font=("Arial", 12), width=20, anchor="w")
+        self.excel_label.grid(row=1, column=1, padx=5, pady=5)
 
-        # GPX-Ordner (Pflicht)
         tk.Label(frame, text="GPX-Ordner (Pflicht):",
                  font=("Arial", 12)).grid(row=2, column=0, columnspan=2,
                                           sticky="w", padx=5, pady=(15, 0))
         tk.Button(frame, text="Auswählen",
                   command=self.select_gpx, width=12).grid(row=3, column=0,
                                                           padx=5, pady=5)
-        self.gpx_label_selected = tk.Label(frame, text="Kein Ordner ausgewählt",
-                                           font=("Arial", 12), width=20,
-                                           anchor="w")
-        self.gpx_label_selected.grid(row=3, column=1, padx=5, pady=5)
+        self.gpx_label = tk.Label(frame, text="Kein Ordner ausgewählt",
+                                  font=("Arial", 12), width=20, anchor="w")
+        self.gpx_label.grid(row=3, column=1, padx=5, pady=5)
 
-        tk.Label(self.master,
-                 text="(Excel optional; GPX-Ordner ist notwendig.)",
+        tk.Label(self.master, text="(Excel optional; GPX-Ordner ist notwendig.)",
                  font=("Arial", 10), fg="gray",
-                 wraplength=self.window_width - 40, justify="center")\
+                 wraplength=self.window_width-40, justify="center")\
             .pack(fill="x", padx=20, pady=(0, 5))
 
         tk.Button(self.master, text="Start", command=self.start_action,
@@ -73,42 +66,36 @@ class WegeRadar:
             .pack(side="bottom", fill="x")
 
     # ------------------------------------------------------- #
-    # Datei-/Ordnerauswahl
-    # ------------------------------------------------------- #
     def select_excel(self):
-        path = filedialog.askopenfilename(title="Excel-Datei auswählen",
-                                          filetypes=[("Excel-Dateien",
-                                                      "*.xlsx *.xls")])
-        if path:
-            self.excel_path = path
-            self.excel_label_selected.config(text=os.path.basename(path))
+        p = filedialog.askopenfilename(title="Excel-Datei auswählen",
+                                       filetypes=[("Excel-Dateien", "*.xlsx *.xls")])
+        if p:
+            self.excel_path = p
+            self.excel_label.config(text=os.path.basename(p))
 
     def select_gpx(self):
-        path = filedialog.askdirectory(title="GPX-Ordner auswählen")
-        if path:
-            self.gpx_path = path
-            self.gpx_label_selected.config(text=os.path.basename(path))
+        p = filedialog.askdirectory(title="GPX-Ordner auswählen")
+        if p:
+            self.gpx_path = p
+            self.gpx_label.config(text=os.path.basename(p))
 
-    # ------------------------------------------------------- #
-    # Hauptaktion nach Klick auf "Start"
     # ------------------------------------------------------- #
     def start_action(self):
         if not self.gpx_path:
-            messagebox.showwarning(APP_NAME,
-                                   "Bitte wähle einen GPX-Ordner aus.",
+            messagebox.showwarning(APP_NAME, "Bitte wähle einen GPX-Ordner aus.",
                                    parent=self.master)
             return
 
-        # vorhandene Widgets entfernen
+        # Oberfläche neu aufbauen
         for w in self.master.winfo_children():
             w.destroy()
         self.master.configure(bg="white")
         try:
-            self.master.state('zoomed')
+            self.master.state("zoomed")
         except tk.TclError:
-            self.master.attributes('-zoomed', True)
+            self.master.attributes("-zoomed", True)
 
-        # linker Bereich (Teilnehmerliste)
+        # linke Leiste
         container = tk.Frame(self.master, bg="white", width=200)
         container.pack(side="left", fill="y")
         canvas = tk.Canvas(container, bg="white", width=200,
@@ -123,8 +110,7 @@ class WegeRadar:
         canvas.pack(side="left", fill="y", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        tk.Frame(self.master, bg="black", width=2)\
-            .pack(side="left", fill="y")
+        tk.Frame(self.master, bg="black", width=2).pack(side="left", fill="y")
 
         self.content_frame = tk.Frame(self.master, bg="white")
         self.content_frame.pack(side="left", fill="both", expand=True)
@@ -134,15 +120,14 @@ class WegeRadar:
             .pack(pady=(10, 5))
 
         files = [f for f in os.listdir(self.gpx_path)
-                 if f.lower().endswith('.gpx')]
-        names = set((f.split('_')[0], f.split('_')[1])
-                    for f in files if len(f.split('_')) >= 3)
-        names = sorted(names, key=lambda x: x[0])
+                 if f.lower().endswith(".gpx")]
+        names = sorted({(f.split("_")[0], f.split("_")[1]) for f in files
+                        if len(f.split("_")) >= 3}, key=lambda x: x[0])
 
         for last, first in names:
-            full = f"{last}, {first}"
-            disp = (full[:17] + "...") if len(full) > 20 else full
-            lbl = tk.Label(scroll_frame, text=disp, font=("Arial", 12),
+            disp = f"{last}, {first}"
+            disp_short = (disp[:17]+"...") if len(disp) > 20 else disp
+            lbl = tk.Label(scroll_frame, text=disp_short, font=("Arial", 12),
                            bg="white", anchor="w", width=20)
             lbl.pack(fill="x", padx=10, pady=2)
             lbl.bind("<Enter>", lambda e, l=lbl: l.config(bg="#e0e0e0"))
@@ -150,8 +135,6 @@ class WegeRadar:
             lbl.bind("<Button-1>",
                      lambda e, l=last, f=first: self.on_name_click(l, f))
 
-    # ------------------------------------------------------- #
-    # Klick auf einen Namen
     # ------------------------------------------------------- #
     def on_name_click(self, last, first):
         for w in self.content_frame.winfo_children():
@@ -163,17 +146,14 @@ class WegeRadar:
             .pack(fill="x", padx=20, pady=(20, 5))
         tk.Button(self.content_frame, text="✖", font=("Arial", 12, "bold"),
                   fg="red", bg="white", bd=0,
-                  command=lambda: [w.destroy()
-                                   for w in self.content_frame.winfo_children()])\
+                  command=lambda: [w.destroy() for w in self.content_frame.winfo_children()])\
             .place(relx=1.0, x=-10, y=10, anchor="ne")
 
         importlib.reload(algorithm)
-        date = algorithm.show_date_dialog(self.master, self.gpx_path,
-                                          last, first)
+        date = algorithm.show_date_dialog(self.master, self.gpx_path, last, first)
         if not date:
             return
 
-        # Loader-Fenster
         loader = tk.Toplevel(self.master)
         loader.title("Bitte warten …")
         loader.resizable(False, False)
@@ -181,29 +161,26 @@ class WegeRadar:
         self.master.update_idletasks()
         mx, my = self.master.winfo_rootx(), self.master.winfo_rooty()
         mw, mh = self.master.winfo_width(), self.master.winfo_height()
-        loader.geometry(f"{w}x{h}+{mx + (mw - w)//2}+{my + (mh - h)//2}")
+        loader.geometry(f"{w}x{h}+{mx+(mw-w)//2}+{my+(mh-h)//2}")
         loader.transient(self.master)
         loader.grab_set()
 
         tk.Label(loader, text="Daten werden geladen …",
                  font=("Arial", 12)).pack(pady=10)
-        progress = ttk.Progressbar(loader, mode="indeterminate")
-        progress.pack(fill="x", padx=20, pady=(0, 10))
-        progress.start()
+        prog = ttk.Progressbar(loader, mode="indeterminate")
+        prog.pack(fill="x", padx=20, pady=(0, 10))
+        prog.start()
 
-        def run_analysis():
-            origins = algorithm.analyze_gpx(self.gpx_path, last,
-                                            first, date)
-            self.master.after(0, lambda: self.show_stops(loader, progress,
-                                                         date, origins))
+        def run():
+            places = algorithm.analyze_gpx(self.gpx_path, last, first, date)
+            self.master.after(0, lambda: self.show_stops(loader, prog,
+                                                         date, places))
 
-        threading.Thread(target=run_analysis, daemon=True).start()
+        threading.Thread(target=run, daemon=True).start()
 
     # ------------------------------------------------------- #
-    # Ergebnisse anzeigen
-    # ------------------------------------------------------- #
-    def show_stops(self, loader, progress, date, origins):
-        progress.stop()
+    def show_stops(self, loader, prog, date, places):
+        prog.stop()
         loader.destroy()
 
         tk.Label(self.content_frame,
@@ -213,47 +190,36 @@ class WegeRadar:
         tk.Frame(self.content_frame, bg="black", height=2)\
             .pack(fill="x", pady=(0, 10))
 
-        if not origins:
-            tk.Label(self.content_frame,
-                     text="Keine Orte gefunden.",
+        if not places:
+            tk.Label(self.content_frame, text="Keine Orte gefunden.",
                      font=("Arial", 12), bg="white", anchor="w")\
                 .pack(fill="x", padx=20, pady=5)
             return
 
-        # Nummerierung: Ort 1, Ort 2, …
-        for idx, place in enumerate(origins, 1):
-            name   = place.get("name", "").strip()
-            road   = place.get("road", "").strip()
-            house  = place.get("house_number", "").strip()
+        for idx, p in enumerate(places, 1):
+            name = p.get("name", "").strip()
+            road = p.get("road", "").strip()
+            house = p.get("house_number", "").strip()
             street = " ".join(x for x in [road, house] if x)
-            pc     = place.get("postcode", "").strip()
-            city   = place.get("city", "").strip()
+
+            pc = p.get("postcode", "").strip()
+            city = p.get("city", "").strip()
             pc_city = ", ".join(x for x in [pc, city] if x)
-            suburb = place.get("suburb", "").strip() or "-"
 
-            # Baue die Hauptzeile zusammen
-            main_parts = []
+            parts = []
             if name:
-                main_parts.append(name)
-            # Straße + Postleitzahl/Stadt
-            addr_line = ", ".join(x for x in [street, pc_city] if x)
-            if addr_line:
-                main_parts.append(addr_line)
+                parts.append(name)
+            addr = ", ".join(x for x in [street, pc_city] if x)
+            if addr:
+                parts.append(addr)
 
-            text = f"Ort {idx}: {' | '.join(main_parts)} | Stadtteil: {suburb}"
+            text = f"Ort {idx}: {' | '.join(parts)}"
 
-            frame = tk.Frame(self.content_frame, bg="white")
-            frame.pack(fill="x", padx=20, pady=5)
-            tk.Label(frame,
-                     text=text,
-                     font=("Arial", 12),
-                     bg="white",
-                     anchor="w",
-                     wraplength=self.window_width * 2)\
-                .pack(fill="x")
+            tk.Label(self.content_frame, text=text, font=("Arial", 12),
+                     bg="white", anchor="w",
+                     wraplength=self.window_width*2)\
+                .pack(fill="x", padx=20, pady=5)
 
-# ----------------------------------------------------------- #
-# App starten                                                 #
 # ----------------------------------------------------------- #
 if __name__ == "__main__":
     root = tk.Tk()
