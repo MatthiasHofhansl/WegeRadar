@@ -4,10 +4,9 @@ benutzeroberfläche.py
 
 Tk-Oberfläche für WegeRadar.
 
-Neu:
-* “Weg n”-Zeile zwischen zwei Orten (Distanz in km).
-* Rechte Ergebnis-Spalte hat jetzt eigene Scrollbar.
-* Ausgabe-Format: Ort n | Aufenthaltszeit | Name (falls vorhanden) | Adresse
+* Scrollbarer rechter Bereich
+* “Weg n”-Einträge zwischen Orten
+* Schwarzer Horizontalbalken füllt nun die ganze Breite (auch unter Scrollbar)
 """
 
 from __future__ import annotations
@@ -20,7 +19,6 @@ import importlib, algorithm
 APP_NAME = "WegeRadar"
 
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Großkreis-Distanz in Kilometern (für Weg-Distanz)."""
     lat1, lon1, lat2, lon2 = map(radians, (lat1, lon1, lat2, lon2))
     dlat, dlon = lat2 - lat1, lon2 - lon1
     a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
@@ -40,11 +38,11 @@ class WegeRadar:
         self.window_width: int = win_w
         self.gpx_path: str | None = None
 
-        # Rahmen für rechte Scroll-Fläche erzeugen (beim Start leer)
+        # Rechts: Scrollbare Fläche
         self.content_frame: tk.Frame | None = None
         self.right_canvas: tk.Canvas | None = None
-        self.right_scrollbar: tk.Scrollbar | None = None
         self.right_inner: tk.Frame | None = None
+        self.right_scrollbar: tk.Scrollbar | None = None
 
         self.setup_ui()
 
@@ -110,7 +108,7 @@ class WegeRadar:
         scrollbar.pack(side="right", fill="y")
         tk.Frame(self.master, bg="black", width=2).pack(side="left", fill="y")
 
-        # Rechte Scroll-Fläche (neu mit eigener Scrollbar)
+        # Rechte Scroll-Fläche
         self.content_frame = tk.Frame(self.master, bg="white")
         self.content_frame.pack(side="left", fill="both", expand=True)
 
@@ -148,7 +146,6 @@ class WegeRadar:
 
     # ---------------- Analyse starten ------- #
     def on_name_click(self, last: str, first: str) -> None:
-        # Rechte Fläche leeren
         for w in self.right_inner.winfo_children():
             w.destroy()
 
@@ -185,15 +182,18 @@ class WegeRadar:
             self.master.after(0, lambda: self.show_stops(loader, prog, date, places))
         threading.Thread(target=run, daemon=True).start()
 
-    # ---------------- Orte + Wege anzeigen -- #
+    # ---------------- Orte anzeigen ------- #
     def show_stops(self, loader: tk.Toplevel, prog: ttk.Progressbar,
                    date: str, places: list[dict]) -> None:
         prog.stop(); loader.destroy()
 
+        # ---- Datum & durchgehende schwarze Linie ---- #
         tk.Label(self.right_inner, text=f"Datum der GPX-Datei: {date}",
                  font=("Arial", 14, "bold"), bg="white", anchor="w")\
             .pack(fill="x", padx=20, pady=(5, 2))
-        tk.Frame(self.right_inner, bg="black", height=2)\
+
+        # Linie über gesamte Breite (legt sie in content_frame an)
+        tk.Frame(self.content_frame, bg="black", height=2)\
             .pack(fill="x", pady=(0, 10))
 
         if not places:
@@ -224,13 +224,12 @@ class WegeRadar:
                 parts.append(addr_line)
 
             ort_text = f"Ort {idx} | " + " | ".join(parts)
-
             tk.Label(self.right_inner, text=ort_text, font=("Arial", 12),
                      bg="white", anchor="w",
                      wraplength=self.window_width * 2)\
                 .pack(fill="x", padx=20, pady=5)
 
-            # Weg n (wenn nicht letzter Ort)
+            # Weg n (falls nicht letzter Ort)
             if idx < len(places):
                 nxt = places[idx]
                 dist_km = _haversine_km(p["lat"], p["lon"], nxt["lat"], nxt["lon"])
