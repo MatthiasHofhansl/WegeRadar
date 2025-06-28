@@ -1,4 +1,3 @@
-# benutzeroberfläche.py
 import os
 import threading
 import tkinter as tk
@@ -13,38 +12,31 @@ class WegeRadar:
         self.master = master
         master.title(APP_NAME)
 
-        # noch kompakteres Startfenster
-        win_w, win_h = 500, 330          # Höhe verringert
+        win_w, win_h = 500, 330
         self.window_width = win_w
         screen_w = master.winfo_screenwidth()
         screen_h = master.winfo_screenheight()
-        x = (screen_w - win_w) // 2
-        y = (screen_h - win_h) // 2
-        master.geometry(f"{win_w}x{win_h}+{x}+{y}")
+        master.geometry(f"{win_w}x{win_h}+{(screen_w-win_w)//2}+{(screen_h-win_h)//2}")
         master.resizable(True, True)
 
         self.content_frame = None
         self.gpx_path = None
-
         self.setup_ui()
 
-    # ------------------------------------------------------- #
+    # ------------------------------------------------------------------- #
     def setup_ui(self):
-        # Überschrift – mittig, weniger Abstand
         tk.Label(self.master, text="Herzlich Willkommen!",
-                 font=("Arial", 24, "bold"))\
-            .pack(pady=(10, 3))           # Abstand reduziert
+                 font=("Arial", 24, "bold")).pack(pady=(10, 3))
 
-        # ---------- GPX-Ordner ---------- #
         gpx_frame = tk.Frame(self.master)
-        gpx_frame.pack(fill="x", padx=20, pady=(5, 0), anchor="w")  # weniger Abstand
+        gpx_frame.pack(fill="x", padx=20, pady=(5, 0), anchor="w")
 
         tk.Label(gpx_frame,
                  text="Bitte lade hier den Ordner mit den GPX-Dateien hoch:",
                  font=("Arial", 12)).grid(row=0, column=0, sticky="w")
 
         row = tk.Frame(gpx_frame)
-        row.grid(row=1, column=0, sticky="ew", pady=2)  # Abstand leicht reduziert
+        row.grid(row=1, column=0, sticky="ew", pady=2)
         row.grid_columnconfigure(1, weight=1)
 
         tk.Button(row, text="Auswählen", width=12,
@@ -54,27 +46,26 @@ class WegeRadar:
                                   font=("Arial", 12), anchor="center")
         self.gpx_label.grid(row=0, column=1, sticky="ew")
 
-        # Start-Button – enger am Inhalt
         tk.Button(self.master, text="Start", command=self.start_action,
                   font=("Arial", 24, "bold"), height=2)\
-            .pack(side="bottom", fill="x", pady=(2, 0))   # Abstand reduziert
+            .pack(side="bottom", fill="x", pady=(2, 0))
 
-    # ------------------------------------------------------- #
+    # ------------------------------------------------------------------- #
     def select_gpx(self):
-        path = filedialog.askdirectory(title="Ordner mit den GPX-Dateien auswählen")
-        if path:
-            self.gpx_path = path
-            self.gpx_label.config(text=os.path.basename(path))
+        p = filedialog.askdirectory(title="Ordner mit den GPX-Dateien auswählen")
+        if p:
+            self.gpx_path = p
+            self.gpx_label.config(text=os.path.basename(p))
 
-    # ------------------------------------------------------- #
-    # ... ab hier ist der Code unverändert ...
+    # ------------------------------------------------------------------- #
+    # Ab hier bleibt fast alles beim Alten – nur Ausgabe angepasst
     def start_action(self):
         if not self.gpx_path:
-            messagebox.showwarning(APP_NAME, "Bitte wähle einen Ordner mit den GPX-Dateien aus.",
+            messagebox.showwarning(APP_NAME,
+                                   "Bitte wähle einen Ordner mit den GPX-Dateien aus.",
                                    parent=self.master)
             return
-        for w in self.master.winfo_children():
-            w.destroy()
+        for w in self.master.winfo_children(): w.destroy()
         self.master.configure(bg="white")
         try:
             self.master.state("zoomed")
@@ -83,8 +74,7 @@ class WegeRadar:
 
         container = tk.Frame(self.master, bg="white", width=200)
         container.pack(side="left", fill="y")
-        canvas = tk.Canvas(container, bg="white", width=200,
-                           highlightthickness=0)
+        canvas = tk.Canvas(container, bg="white", width=200, highlightthickness=0)
         scrollbar = tk.Scrollbar(container, orient="vertical",
                                  command=canvas.yview)
         scroll_frame = tk.Frame(canvas, bg="white")
@@ -94,7 +84,6 @@ class WegeRadar:
         canvas.configure(yscrollcommand=scrollbar.set)
         canvas.pack(side="left", fill="y", expand=True)
         scrollbar.pack(side="right", fill="y")
-
         tk.Frame(self.master, bg="black", width=2).pack(side="left", fill="y")
 
         self.content_frame = tk.Frame(self.master, bg="white")
@@ -119,9 +108,9 @@ class WegeRadar:
             lbl.bind("<Button-1>",
                      lambda e, l=last, f=first: self.on_name_click(l, f))
 
+    # ------------------------------------------------------------------- #
     def on_name_click(self, last, first):
-        for w in self.content_frame.winfo_children():
-            w.destroy()
+        for w in self.content_frame.winfo_children(): w.destroy()
 
         tk.Label(self.content_frame,
                  text=f"Teilnehmer(in): {last}, {first}",
@@ -138,38 +127,32 @@ class WegeRadar:
         if not date:
             return
 
-        loader = tk.Toplevel(self.master)
-        loader.title("Bitte warten…")
+        loader = tk.Toplevel(self.master); loader.title("Bitte warten…")
         loader.resizable(False, False)
-        w, h = 300, 80
-        self.master.update_idletasks()
+        w, h = 300, 80; self.master.update_idletasks()
         mx, my = self.master.winfo_rootx(), self.master.winfo_rooty()
         mw, mh = self.master.winfo_width(), self.master.winfo_height()
         loader.geometry(f"{w}x{h}+{mx+(mw-w)//2}+{my+(mh-h)//2}")
-        loader.transient(self.master)
-        loader.grab_set()
+        loader.transient(self.master); loader.grab_set()
 
         tk.Label(loader, text="Daten werden geladen…",
                  font=("Arial", 12)).pack(pady=10)
         prog = ttk.Progressbar(loader, mode="indeterminate")
-        prog.pack(fill="x", padx=20, pady=(0, 10))
-        prog.start()
+        prog.pack(fill="x", padx=20, pady=(0, 10)); prog.start()
 
         def run():
             places = algorithm.analyze_gpx(self.gpx_path, last, first, date)
             self.master.after(0, lambda: self.show_stops(loader, prog, date, places))
-
         threading.Thread(target=run, daemon=True).start()
 
+    # ------------------------------------------------------------------- #
     def show_stops(self, loader, prog, date, places):
-        prog.stop()
-        loader.destroy()
+        prog.stop(); loader.destroy()
 
         tk.Label(self.content_frame, text=f"Datum der GPX-Datei: {date}",
                  font=("Arial", 14, "bold"), bg="white", anchor="w")\
             .pack(fill="x", padx=20, pady=(5, 2))
-        tk.Frame(self.content_frame, bg="black", height=2)\
-            .pack(fill="x", pady=(0, 10))
+        tk.Frame(self.content_frame, bg="black", height=2).pack(fill="x", pady=(0, 10))
 
         if not places:
             tk.Label(self.content_frame, text="Keine Orte gefunden.",
@@ -178,30 +161,31 @@ class WegeRadar:
             return
 
         for idx, p in enumerate(places, 1):
+            time_str = p["start_dt"].strftime("%H:%M") + " Uhr"
+
             name = p.get("name", "").strip()
             road = p.get("road", "").strip()
             house = p.get("house_number", "").strip()
             street = " ".join(x for x in [road, house] if x)
-
             pc = p.get("postcode", "").strip()
             city = p.get("city", "").strip()
             pc_city = ", ".join(x for x in [pc, city] if x)
 
-            parts = []
+            addr_parts = []
             if name:
-                parts.append(name)
-            addr = ", ".join(x for x in [street, pc_city] if x)
-            if addr:
-                parts.append(addr)
+                addr_parts.append(name)
+            addr_line = ", ".join(x for x in [street, pc_city] if x)
+            if addr_line:
+                addr_parts.append(addr_line)
 
-            text = f"Ort {idx}: {' | '.join(parts)}"
+            text = f"Ort {idx} | {time_str} | {' | '.join(addr_parts)}"
 
             tk.Label(self.content_frame, text=text, font=("Arial", 12),
                      bg="white", anchor="w",
                      wraplength=self.window_width * 2)\
                 .pack(fill="x", padx=20, pady=5)
 
-# ----------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
 if __name__ == "__main__":
     root = tk.Tk()
     WegeRadar(root)
