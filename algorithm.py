@@ -1,17 +1,20 @@
 # algorithm.py
 import os
+import time
+import requests
 import gpxpy
 from math import radians, cos, sin, asin, sqrt
 from datetime import timezone
 
 # --------------------------------------------------------------------------- #
-# Schwellenwerte (frei anpassbar)
+# Schwellenwerte (ggf. anpassen)
 # --------------------------------------------------------------------------- #
 DIST_THRESHOLD_M      = 50      # Radius, um Punkte demselben Ort zuzuordnen
 MIN_STOP_DURATION_SEC = 180     # Mindestaufenthalt: 3 Minuten
+NOMINATIM_SLEEP_SEC   = 1       # Wartezeit zwischen API-Aufrufen
 
 # --------------------------------------------------------------------------- #
-# Hilfsfunktionen
+# Haversine – Distanz zweier Geo-Punkte
 # --------------------------------------------------------------------------- #
 def haversine(lat1, lon1, lat2, lon2):
     """Entfernung zweier Lat/Lon-Paare in Metern (Großkreis, Haversine)."""
@@ -20,11 +23,49 @@ def haversine(lat1, lon1, lat2, lon2):
     a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
     return 6371000 * 2 * asin(sqrt(a))
 
+# --------------------------------------------------------------------------- #
+# Reverse-Geocoding (OpenStreetMap / Nominatim) – mit einfachem Cache
+# --------------------------------------------------------------------------- #
+_GEOCACHE: dict[tuple[float, float], str] = {}
+_NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
+_NOMINATIM_HEADERS = {
+    "User-Agent": "WegeRadar/1.0 (kontakt@example.com)"  # bitte ggf. anpassen
+}
 
+def reverse_geocode(lat: float, lon: float) -> str:
+    """
+    Liefert für (lat, lon) eine menschen­lesbare Adresse.
+    Bei Fehlschlag → 'Adresse nicht gefunden'.
+    """
+    key = (round(lat, 5), round(lon, 5))   # 5 Nachkommastellen = ~1 m
+    if key in _GEOCACHE:
+        return _GEOCACHE[key]
+
+    try:
+        resp = requests.get(
+            _NOMINATIM_URL,
+            params={"format": "jsonv2", "lat": lat, "lon": lon, "zoom": 18},
+            headers=_NOMINATIM_HEADERS,
+            timeout=5
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            address = data.get("display_name") or "Adresse nicht gefunden"
+        else:
+            address = "Adresse nicht gefunden"
+    except Exception:
+        address = "Adresse nicht gefunden"
+
+    _GEOCACHE[key] = address
+    time.sleep(NOMINATIM_SLEEP_SEC)        # höfliche Pause lt. OSM-Policy
+    return address
+
+# --------------------------------------------------------------------------- #
+# Kleiner Datumsauswahldialog (von Oberfläche genutzt)
+# --------------------------------------------------------------------------- #
 def show_date_dialog(master, gpx_folder, last, first):
     """
-    Öffnet einen kleinen Dialog, in dem der Nutzer das Datum (Dateinamen-Suffix)
-    der gewünschten GPX-Datei auswählen kann.
+    Öffnet einen Dialog zur Auswahl der GPX-Datei (Datumsteil des Namens).
     """
     prefix = f"{last}_{first}_"
     files = [f for f in os.listdir(gpx_folder)
@@ -70,23 +111,18 @@ def show_date_dialog(master, gpx_folder, last, first):
     dlg.wait_window()
     return selected["date"]
 
-
 # --------------------------------------------------------------------------- #
-# Kernfunktion: Stay-Point-Analyse
+# Kernfunktion: Stay-Point-Analyse + Adresse
 # --------------------------------------------------------------------------- #
 def analyze_gpx(gpx_folder, last, first, date,
-                dist_m=DIST_THRESHOLD_M,
-                min_stop_sec=MIN_STOP_DURATION_SEC):
+                dist_m: int = DIST_THRESHOLD_M,
+                min_stop_sec: int = MIN_STOP_DURATION_SEC):
     """
     Liest die GPX-Datei <last>_<first>_<date>.gpx ein und liefert eine Liste
-    von Koordinaten (lat, lon):
+    von Tripeln (lat, lon, adresse):
 
-        * Alle Aufenthaltsorte (mind. min_stop_sec innerhalb dist_m)
-        * Zusätzlich Start- und Endkoordinate der Aufzeichnung,
-          falls sie nicht bereits in einem Aufenthaltscluster liegen.
-
-    Rückgabeformat:
-        List[Tuple[float, float]]
+      * Alle Aufenthaltsorte (≥ min_stop_sec innerhalb dist_m)
+      * Plus Start- und Endkoordinate, falls sie nicht bereits abgedeckt sind
     """
     filename = f"{last}_{first}_{date}.gpx"
     path = os.path.join(gpx_folder, filename)
@@ -106,10 +142,10 @@ def analyze_gpx(gpx_folder, last, first, date,
     if not pts:
         return []
 
-    pts.sort(key=lambda x: x[0])          # chronologisch
+    pts.sort(key=lambda x: x[0])            # chronologisch
 
     # ---------------- Stay-Point-Detection -------- #
-    stay_points = []
+    stay_points: list[tuple[float, float]] = []
     i, n = 0, len(pts)
 
     while i < n:
@@ -131,18 +167,21 @@ def analyze_gpx(gpx_folder, last, first, date,
 
     # ---------------- Start/End-Punkt ergänzen ---- #
     def inside_existing(lat, lon):
-        """True, wenn (lat, lon) bereits in stay_points (innerhalb dist_m)."""
         return any(haversine(lat, lon, s_lat, s_lon) <= dist_m
                    for s_lat, s_lon in stay_points)
 
-    # Erster Trackpunkt
     start_lat, start_lon = pts[0][1], pts[0][2]
     if not inside_existing(start_lat, start_lon):
         stay_points.insert(0, (start_lat, start_lon))
 
-    # Letzter Trackpunkt
     end_lat, end_lon = pts[-1][1], pts[-1][2]
     if not inside_existing(end_lat, end_lon):
         stay_points.append((end_lat, end_lon))
 
-    return stay_points
+    # ---------------- Reverse-Geocoding ----------- #
+    result: list[tuple[float, float, str]] = []
+    for lat, lon in stay_points:
+        addr = reverse_geocode(lat, lon)
+        result.append((lat, lon, addr))
+
+    return result

@@ -4,7 +4,7 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import importlib
-import algorithm  # sorgt dafür, dass Modul beim Start geladen ist
+import algorithm  # Modul wird beim Start geladen
 
 APP_NAME = "WegeRadar"
 
@@ -28,6 +28,9 @@ class WegeRadar:
 
         self.setup_ui()
 
+    # ------------------------------------------------------- #
+    # Grund-UI
+    # ------------------------------------------------------- #
     def setup_ui(self):
         tk.Label(self.master, text="Herzlich Willkommen!",
                  font=("Arial", 24, "bold")).pack(pady=(20, 10))
@@ -35,6 +38,7 @@ class WegeRadar:
         frame = tk.Frame(self.master)
         frame.pack(pady=10)
 
+        # Excel (optional)
         tk.Label(frame, text="Excel-Datei (optional):",
                  font=("Arial", 12)).grid(row=0, column=0, columnspan=2,
                                           sticky="w", padx=5)
@@ -46,6 +50,7 @@ class WegeRadar:
                                              anchor="w")
         self.excel_label_selected.grid(row=1, column=1, padx=5, pady=5)
 
+        # GPX-Ordner (Pflicht)
         tk.Label(frame, text="GPX-Ordner (Pflicht):",
                  font=("Arial", 12)).grid(row=2, column=0, columnspan=2,
                                           sticky="w", padx=5, pady=(15, 0))
@@ -67,6 +72,9 @@ class WegeRadar:
                   font=("Arial", 24, "bold"), height=2)\
             .pack(side="bottom", fill="x")
 
+    # ------------------------------------------------------- #
+    # Datei-/Ordnerauswahl
+    # ------------------------------------------------------- #
     def select_excel(self):
         path = filedialog.askopenfilename(title="Excel-Datei auswählen",
                                           filetypes=[("Excel-Dateien",
@@ -81,6 +89,9 @@ class WegeRadar:
             self.gpx_path = path
             self.gpx_label_selected.config(text=os.path.basename(path))
 
+    # ------------------------------------------------------- #
+    # Hauptaktion nach Klick auf "Start"
+    # ------------------------------------------------------- #
     def start_action(self):
         if not self.gpx_path:
             messagebox.showwarning(APP_NAME,
@@ -88,6 +99,7 @@ class WegeRadar:
                                    parent=self.master)
             return
 
+        # Links Menü + rechts Content-Frame aufbauen
         for w in self.master.winfo_children():
             w.destroy()
         self.master.configure(bg="white")
@@ -116,13 +128,15 @@ class WegeRadar:
         self.content_frame = tk.Frame(self.master, bg="white")
         self.content_frame.pack(side="left", fill="both", expand=True)
 
+        # Teilnehmerliste links
         tk.Label(scroll_frame, text="Teilnehmerinnen\nund Teilnehmer",
                  font=("Arial", 14, "bold"), bg="white", justify="center")\
             .pack(pady=(10, 5))
 
         files = [f for f in os.listdir(self.gpx_path)
                  if f.lower().endswith('.gpx')]
-        names = set((f.split('_')[0], f.split('_')[1]) for f in files if len(f.split('_'))>=3)
+        names = set((f.split('_')[0], f.split('_')[1])
+                    for f in files if len(f.split('_')) >= 3)
         names = sorted(names, key=lambda x: x[0])
 
         for last, first in names:
@@ -136,6 +150,9 @@ class WegeRadar:
             lbl.bind("<Button-1>",
                      lambda e, l=last, f=first: self.on_name_click(l, f))
 
+    # ------------------------------------------------------- #
+    # Klick auf einen Namen
+    # ------------------------------------------------------- #
     def on_name_click(self, last, first):
         for w in self.content_frame.winfo_children():
             w.destroy()
@@ -156,6 +173,7 @@ class WegeRadar:
         if not date:
             return
 
+        # Loader-Fenster
         loader = tk.Toplevel(self.master)
         loader.title("Bitte warten …")
         loader.resizable(False, False)
@@ -175,12 +193,15 @@ class WegeRadar:
 
         def run_analysis():
             origins = algorithm.analyze_gpx(self.gpx_path, last,
-                                           first, date)
+                                            first, date)
             self.master.after(0, lambda: self.show_stops(loader, progress,
                                                          date, origins))
 
         threading.Thread(target=run_analysis, daemon=True).start()
 
+    # ------------------------------------------------------- #
+    # Ergebnisse anzeigen
+    # ------------------------------------------------------- #
     def show_stops(self, loader, progress, date, origins):
         progress.stop()
         loader.destroy()
@@ -199,11 +220,22 @@ class WegeRadar:
                 .pack(fill="x", padx=20, pady=5)
             return
 
-        for lat, lon in origins:
+        for lat, lon, addr in origins:
             frame = tk.Frame(self.content_frame, bg="white")
             frame.pack(fill="x", padx=20, pady=5)
-            tk.Label(frame,
-                     text=f"Ausgangskoordinate: {lat:.5f}, {lon:.5f}",
-                     font=("Arial", 12), bg="white", anchor="w",
-                     wraplength=self.window_width*2)\
-                .pack(fill="x")
+            tk.Label(
+                frame,
+                text=f"Ausgangskoordinate: {lat:.5f}, {lon:.5f} | {addr}",
+                font=("Arial", 12),
+                bg="white",
+                anchor="w",
+                wraplength=self.window_width * 2        # für lange Adressen
+            ).pack(fill="x")
+
+# ----------------------------------------------------------- #
+# App starten                                                 #
+# ----------------------------------------------------------- #
+if __name__ == "__main__":
+    root = tk.Tk()
+    WegeRadar(root)
+    root.mainloop()
