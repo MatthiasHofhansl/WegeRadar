@@ -90,7 +90,7 @@ class WegeRadar:
             self.gpx_label_selected.config(text=os.path.basename(path))
 
     # ------------------------------------------------------- #
-    # Hauptaktion nach Klick auf "Start"
+    # Hauptaktion
     # ------------------------------------------------------- #
     def start_action(self):
         if not self.gpx_path:
@@ -99,7 +99,7 @@ class WegeRadar:
                                    parent=self.master)
             return
 
-        # Links Menü + rechts Content-Frame aufbauen
+        # vorhandene Widgets entfernen
         for w in self.master.winfo_children():
             w.destroy()
         self.master.configure(bg="white")
@@ -108,6 +108,7 @@ class WegeRadar:
         except tk.TclError:
             self.master.attributes('-zoomed', True)
 
+        # linker Bereich (Teilnehmerliste)
         container = tk.Frame(self.master, bg="white", width=200)
         container.pack(side="left", fill="y")
         canvas = tk.Canvas(container, bg="white", width=200,
@@ -128,7 +129,6 @@ class WegeRadar:
         self.content_frame = tk.Frame(self.master, bg="white")
         self.content_frame.pack(side="left", fill="both", expand=True)
 
-        # Teilnehmerliste links
         tk.Label(scroll_frame, text="Teilnehmerinnen\nund Teilnehmer",
                  font=("Arial", 14, "bold"), bg="white", justify="center")\
             .pack(pady=(10, 5))
@@ -229,7 +229,7 @@ class WegeRadar:
                 font=("Arial", 12),
                 bg="white",
                 anchor="w",
-                wraplength=self.window_width * 2        # für lange Adressen
+                wraplength=self.window_width * 2
             ).pack(fill="x")
 
 # ----------------------------------------------------------- #
