@@ -39,7 +39,7 @@ MAX_GAP_SEC_SAME_ADDR = 10 * 60        # 10 Minuten
 # Hilfsfunktionen
 # --------------------------------------------------------------------------- #
 def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Meter‐Distanz (Großkreis) zwischen zwei Koordinaten."""
+    """Meter-Distanz (Großkreis) zwischen zwei Koordinaten."""
     lat1, lon1, lat2, lon2 = map(radians, (lat1, lon1, lat2, lon2))
     dlat, dlon = lat2 - lat1, lon2 - lon1
     a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
@@ -141,6 +141,7 @@ def _same_address(a: dict, b: dict) -> bool:
             return False
     return True
 
+
 def analyze_gpx(
     gpx_folder: str,
     last: str,
@@ -149,7 +150,11 @@ def analyze_gpx(
     dist_m: int = DIST_THRESHOLD_M,
     min_stop_sec: int = MIN_STOP_DURATION_SEC,
 ) -> List[dict]:
-    """Analysiert GPX, verschmilzt Orte nach beiden Regeln."""
+    """
+    Analysiert GPX, verschmilzt Orte nach beiden Regeln und
+    ergänzt pro Aufenthalt die reale Distanz zum nächsten Ort
+    anhand der GPX-Spur (Option 1 aus der Diskussion).
+    """
     path = os.path.join(gpx_folder, f"{last}_{first}_{date}.gpx")
     if not os.path.exists(path):
         return []
@@ -228,5 +233,41 @@ def analyze_gpx(
             prev["end_dt"] = item["end_dt"]          # Endzeit erweitern
         else:
             final.append(item)
+
+    # --------------------------------------------------------------------- #
+    # Reale Streckenlängen zwischen aufeinanderfolgenden Aufenthalten
+    # --------------------------------------------------------------------- #
+    # Vorbereiten: Zeitstempel in UTC für schnelle Vergleiche
+    utc_start_end = [
+        (
+            s["end_dt"].astimezone(timezone.utc),
+            n["start_dt"].astimezone(timezone.utc),
+        )
+        for s, n in zip(final[:-1], final[1:])
+    ]
+
+    # Für jede Weg-Etappe summieren wir die Haversine-Abstände der
+    # *aufgezeichneten* Track-Punkte zwischen den Zeitfenstern.
+    for seg_idx, (t_end_prev, t_start_next) in enumerate(utc_start_end):
+        dist_m_real = 0.0
+        acc = False
+        for i in range(len(pts) - 1):
+            t0, lat0, lon0 = pts[i]
+            t1, lat1, lon1 = pts[i + 1]
+
+            # Noch vor dem Segment?
+            if t1 < t_end_prev:
+                continue
+            # Ab dem ersten Punkt nach t_end_prev sammeln
+            if not acc and t0 >= t_end_prev:
+                acc = True
+            if acc:
+                dist_m_real += haversine(lat0, lon0, lat1, lon1)
+            # Segment fertig?
+            if acc and t1 >= t_start_next:
+                break
+
+        # Kilometer mit 2 Nachkommastellen speichern
+        final[seg_idx]["next_dist_km_real"] = round(dist_m_real / 1000.0, 2)
 
     return final

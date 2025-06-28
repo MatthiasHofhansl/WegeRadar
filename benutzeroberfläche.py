@@ -303,11 +303,17 @@ class WegeRadar:
                 wraplength=self.window_width * 2,
             ).pack(fill="x", padx=20, pady=5)
 
+            # ----------------------------------------------------------
+            # Echte Streckenlänge statt Luftlinie
+            # ----------------------------------------------------------
             if idx < len(places):
-                nxt = places[idx]
-                dist_km = _haversine_km(
-                    p["lat"], p["lon"], nxt["lat"], nxt["lon"]
-                )
+                dist_km = p.get("next_dist_km_real")
+                # Fallback (sollte nie nötig sein, aber zur Sicherheit):
+                if dist_km is None:
+                    nxt = places[idx]
+                    dist_km = _haversine_km(
+                        p["lat"], p["lon"], nxt["lat"], nxt["lon"]
+                    )
                 weg_text = f"Weg {idx}: Distanz {dist_km:.2f} km"
                 tk.Label(
                     self.list_inner,
