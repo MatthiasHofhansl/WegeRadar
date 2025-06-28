@@ -2,20 +2,29 @@
 benutzeroberfläche.py
 =====================
 
-Tk-Oberfläche für WegeRadar (vollständig).
-Ausgabezeile:
+Tk-Oberfläche für WegeRadar.
 
-    Ort n | HH:MM Uhr - HH:MM Uhr | Name | Adresse
-    (ohne Name, falls leer)
+Neu:
+* “Weg n”-Zeile zwischen zwei Orten (Distanz in km).
+* Rechte Ergebnis-Spalte hat jetzt eigene Scrollbar.
+* Ausgabe-Format: Ort n | Aufenthaltszeit | Name (falls vorhanden) | Adresse
 """
 
 from __future__ import annotations
 
 import os, threading, tkinter as tk
 from tkinter import filedialog, messagebox, ttk
+from math import radians, cos, sin, asin, sqrt
 import importlib, algorithm
 
 APP_NAME = "WegeRadar"
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Großkreis-Distanz in Kilometern (für Weg-Distanz)."""
+    lat1, lon1, lat2, lon2 = map(radians, (lat1, lon1, lat2, lon2))
+    dlat, dlon = lat2 - lat1, lon2 - lon1
+    a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
+    return 6371.0 * 2 * asin(sqrt(a))
 
 class WegeRadar:
     # ------------------------------------------------------------------- #
@@ -30,7 +39,12 @@ class WegeRadar:
 
         self.window_width: int = win_w
         self.gpx_path: str | None = None
+
+        # Rahmen für rechte Scroll-Fläche erzeugen (beim Start leer)
         self.content_frame: tk.Frame | None = None
+        self.right_canvas: tk.Canvas | None = None
+        self.right_scrollbar: tk.Scrollbar | None = None
+        self.right_inner: tk.Frame | None = None
 
         self.setup_ui()
 
@@ -96,8 +110,20 @@ class WegeRadar:
         scrollbar.pack(side="right", fill="y")
         tk.Frame(self.master, bg="black", width=2).pack(side="left", fill="y")
 
+        # Rechte Scroll-Fläche (neu mit eigener Scrollbar)
         self.content_frame = tk.Frame(self.master, bg="white")
         self.content_frame.pack(side="left", fill="both", expand=True)
+
+        self.right_canvas = tk.Canvas(self.content_frame, bg="white", highlightthickness=0)
+        self.right_scrollbar = tk.Scrollbar(self.content_frame, orient="vertical",
+                                            command=self.right_canvas.yview)
+        self.right_inner = tk.Frame(self.right_canvas, bg="white")
+        self.right_inner.bind("<Configure>",
+                              lambda e: self.right_canvas.configure(scrollregion=self.right_canvas.bbox("all")))
+        self.right_canvas.create_window((0, 0), window=self.right_inner, anchor="nw")
+        self.right_canvas.configure(yscrollcommand=self.right_scrollbar.set)
+        self.right_canvas.pack(side="left", fill="both", expand=True)
+        self.right_scrollbar.pack(side="right", fill="y")
 
         tk.Label(scroll_frame,
                  text="Teilnehmerinnen\nund Teilnehmer",
@@ -122,18 +148,20 @@ class WegeRadar:
 
     # ---------------- Analyse starten ------- #
     def on_name_click(self, last: str, first: str) -> None:
-        for w in self.content_frame.winfo_children():
+        # Rechte Fläche leeren
+        for w in self.right_inner.winfo_children():
             w.destroy()
 
-        tk.Label(self.content_frame,
+        heading = tk.Frame(self.right_inner, bg="white")
+        heading.pack(fill="x")
+        tk.Label(heading,
                  text=f"Teilnehmer(in): {last}, {first}",
-                 font=("Arial", 14, "bold"), bg="white", anchor="w")\
-            .pack(fill="x", padx=20, pady=(20, 5))
-        tk.Button(self.content_frame, text="✖", font=("Arial", 12, "bold"),
+                 font=("Arial", 14, "bold"),
+                 bg="white", anchor="w").pack(side="left", padx=10, pady=10)
+        tk.Button(heading, text="✖", font=("Arial", 12, "bold"),
                   fg="red", bg="white", bd=0,
-                  command=lambda: [w.destroy()
-                                   for w in self.content_frame.winfo_children()])\
-            .place(relx=1.0, x=-10, y=10, anchor="ne")
+                  command=lambda: [w.destroy() for w in self.right_inner.winfo_children()])\
+            .pack(side="right", padx=10, pady=10)
 
         importlib.reload(algorithm)
         date = algorithm.show_date_dialog(self.master, self.gpx_path, last, first)
@@ -157,19 +185,19 @@ class WegeRadar:
             self.master.after(0, lambda: self.show_stops(loader, prog, date, places))
         threading.Thread(target=run, daemon=True).start()
 
-    # ---------------- Orte anzeigen ------- #
+    # ---------------- Orte + Wege anzeigen -- #
     def show_stops(self, loader: tk.Toplevel, prog: ttk.Progressbar,
                    date: str, places: list[dict]) -> None:
         prog.stop(); loader.destroy()
 
-        tk.Label(self.content_frame, text=f"Datum der GPX-Datei: {date}",
+        tk.Label(self.right_inner, text=f"Datum der GPX-Datei: {date}",
                  font=("Arial", 14, "bold"), bg="white", anchor="w")\
             .pack(fill="x", padx=20, pady=(5, 2))
-        tk.Frame(self.content_frame, bg="black", height=2)\
+        tk.Frame(self.right_inner, bg="black", height=2)\
             .pack(fill="x", pady=(0, 10))
 
         if not places:
-            tk.Label(self.content_frame, text="Keine Orte gefunden.",
+            tk.Label(self.right_inner, text="Keine Orte gefunden.",
                      font=("Arial", 12), bg="white", anchor="w")\
                 .pack(fill="x", padx=20, pady=5)
             return
@@ -188,22 +216,29 @@ class WegeRadar:
             city = p.get("city", "").strip()
             pc_city = ", ".join(x for x in (pc, city) if x)
 
-            # Aufbau: Zeit zuerst, dann Name (falls vorhanden), dann Adresse
             parts: list[str] = [time_span]
-
-            addr_line = ", ".join(x for x in (street, pc_city) if x)
-
             if name:
                 parts.append(name)
+            addr_line = ", ".join(x for x in (street, pc_city) if x)
             if addr_line:
                 parts.append(addr_line)
 
-            text = f"Ort {idx} | " + " | ".join(parts)
+            ort_text = f"Ort {idx} | " + " | ".join(parts)
 
-            tk.Label(self.content_frame, text=text, font=("Arial", 12),
+            tk.Label(self.right_inner, text=ort_text, font=("Arial", 12),
                      bg="white", anchor="w",
                      wraplength=self.window_width * 2)\
                 .pack(fill="x", padx=20, pady=5)
+
+            # Weg n (wenn nicht letzter Ort)
+            if idx < len(places):
+                nxt = places[idx]
+                dist_km = _haversine_km(p["lat"], p["lon"], nxt["lat"], nxt["lon"])
+                weg_text = f"Weg {idx}: Distanz {dist_km:.2f} km"
+                tk.Label(self.right_inner, text=weg_text,
+                         font=("Arial", 11, "italic"),
+                         bg="white", anchor="w")\
+                    .pack(fill="x", padx=40, pady=(0, 5))
 
 # --------------------------------------------------------------------------- #
 if __name__ == "__main__":

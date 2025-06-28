@@ -2,7 +2,7 @@
 algorithm.py
 ============
 
-Erkennt Aufenthalts-Orte und liefert zu jedem Ort
+Erkennt Aufenthalts-Orte und liefert zu jedem Ort:
 
     • Koordinaten (lat, lon)
     • start_dt, end_dt   (Europe/Berlin)
