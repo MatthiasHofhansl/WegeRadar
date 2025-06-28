@@ -13,7 +13,7 @@ class WegeRadar:
         self.master = master
         master.title(APP_NAME)
 
-        # kompakteres Startfenster (kleiner)
+        # kompaktes Startfenster
         win_w, win_h = 500, 380
         self.window_width = win_w
         screen_w = master.winfo_screenwidth()
@@ -39,26 +39,31 @@ class WegeRadar:
         gpx_frame = tk.Frame(self.master)
         gpx_frame.pack(fill="x", padx=20, pady=(10, 0), anchor="w")
 
-        tk.Label(gpx_frame, text="GPX-Ordner (Pflicht):",
-                 font=("Arial", 12))\
-            .grid(row=0, column=0, sticky="w")
+        # Beschreibung
+        tk.Label(gpx_frame,
+                 text="Bitte lade hier den Ordner mit den GPX-Dateien hoch:",
+                 font=("Arial", 12)).grid(row=0, column=0, sticky="w")
 
-        tk.Button(gpx_frame, text="Auswählen", width=12,
-                  command=self.select_gpx)\
-            .grid(row=1, column=0, sticky="w", pady=3)
+        # Unterzeile: Button links, Label zentriert daneben
+        row = tk.Frame(gpx_frame)
+        row.grid(row=1, column=0, sticky="ew", pady=3)
+        row.grid_columnconfigure(1, weight=1)
 
-        self.gpx_label = tk.Label(gpx_frame, text="Kein Ordner ausgewählt",
-                                  font=("Arial", 12), width=25, anchor="w")
-        self.gpx_label.grid(row=1, column=1, padx=10, pady=3, sticky="w")
+        tk.Button(row, text="Auswählen", width=12,
+                  command=self.select_gpx).grid(row=0, column=0, sticky="w")
 
-        # Start-Button (direkt unten, weniger Abstand)
+        self.gpx_label = tk.Label(row, text="Keinen Ordner ausgewählt.",
+                                  font=("Arial", 12), anchor="center")
+        self.gpx_label.grid(row=0, column=1, sticky="ew")
+
+        # Start-Button (geringer Abstand)
         tk.Button(self.master, text="Start", command=self.start_action,
                   font=("Arial", 24, "bold"), height=2)\
             .pack(side="bottom", fill="x", pady=(5, 0))
 
     # ------------------------------------------------------- #
     def select_gpx(self):
-        path = filedialog.askdirectory(title="GPX-Ordner auswählen")
+        path = filedialog.askdirectory(title="Ordner mit den GPX-Dateien auswählen")
         if path:
             self.gpx_path = path
             self.gpx_label.config(text=os.path.basename(path))
@@ -66,7 +71,7 @@ class WegeRadar:
     # ------------------------------------------------------- #
     def start_action(self):
         if not self.gpx_path:
-            messagebox.showwarning(APP_NAME, "Bitte wähle einen GPX-Ordner aus.",
+            messagebox.showwarning(APP_NAME, "Bitte wähle einen Ordner mit den GPX-Dateien aus.",
                                    parent=self.master)
             return
 
@@ -106,8 +111,7 @@ class WegeRadar:
                  font=("Arial", 14, "bold"), bg="white", justify="center")\
             .pack(pady=(10, 5))
 
-        files = [f for f in os.listdir(self.gpx_path)
-                 if f.lower().endswith(".gpx")]
+        files = [f for f in os.listdir(self.gpx_path) if f.lower().endswith(".gpx")]
         names = sorted({(f.split("_")[0], f.split("_")[1]) for f in files
                         if len(f.split("_")) >= 3}, key=lambda x: x[0])
 
@@ -143,7 +147,7 @@ class WegeRadar:
             return
 
         loader = tk.Toplevel(self.master)
-        loader.title("Bitte warten …")
+        loader.title("Bitte warten…")
         loader.resizable(False, False)
         w, h = 300, 80
         self.master.update_idletasks()
@@ -153,7 +157,7 @@ class WegeRadar:
         loader.transient(self.master)
         loader.grab_set()
 
-        tk.Label(loader, text="Daten werden geladen …",
+        tk.Label(loader, text="Daten werden geladen…",
                  font=("Arial", 12)).pack(pady=10)
         prog = ttk.Progressbar(loader, mode="indeterminate")
         prog.pack(fill="x", padx=20, pady=(0, 10))
@@ -163,7 +167,6 @@ class WegeRadar:
             places = algorithm.analyze_gpx(self.gpx_path, last, first, date)
             self.master.after(0, lambda: self.show_stops(loader, prog,
                                                          date, places))
-
         threading.Thread(target=run, daemon=True).start()
 
     # ------------------------------------------------------- #
