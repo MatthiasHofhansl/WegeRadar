@@ -7,8 +7,9 @@ Tk-Oberfläche für WegeRadar.
 * Orts-/Weg-Liste scrollt separat.
 * Schwarze Linie bis ganz rechts.
 * Datum-Label bündig zu „Teilnehmer(in):“.
-* Pro Weg zwei Zeilen, zweite steht exakt unter „Weg … │“ und
-  zeigt das vollständige, absteigend sortierte Verkehrsmittel-Ranking.
+* Pro Weg zwei Zeilen:
+    Zeile 1: Weg … │ Dauer …; Distanz …; Durchschnittliche Geschwindigkeit …
+    Zeile 2: Verkehrsmittel: <Ranking>
 """
 
 from __future__ import annotations
@@ -303,24 +304,30 @@ class WegeRadar:
             ).pack(fill="x", padx=20, pady=5)
 
             # ----------------------------------------------------------
-            # Distanz, Geschwindigkeit & Verkehrsmittel
+            # Distanz, Dauer, Geschwindigkeit & Verkehrsmittel
             # ----------------------------------------------------------
             if idx < len(places):
+                nxt = places[idx]
                 dist_km = p.get("next_dist_km_real")
                 speed_kmh = p.get("next_speed_kmh_real")
 
                 if dist_km is None:
-                    nxt = places[idx]
                     dist_km = _haversine_km(p["lat"], p["lon"], nxt["lat"], nxt["lon"])
+
+                duration_sec = (nxt["start_dt"] - p["end_dt"]).total_seconds()
+                d_h = int(duration_sec // 3600)
+                d_m = int((duration_sec % 3600) // 60)
+                duration_str = f"{d_h}:{d_m:02d} h"
+
                 if speed_kmh is None:
-                    nxt = places[idx]
-                    hours = (nxt["start_dt"] - p["end_dt"]).total_seconds() / 3600
+                    hours = duration_sec / 3600
                     speed_kmh = dist_km / hours if hours > 0 else 0.0
 
-                # Zeile 1: Weg, Distanz, Tempo
+                # Zeile 1: Weg, Dauer, Distanz, Tempo
                 prefix = f"Weg {idx} │ "
                 line1 = (
-                    f"{prefix}Distanz: {dist_km:.2f} km; "
+                    f"{prefix}Dauer: {duration_str}; "
+                    f"Distanz: {dist_km:.2f} km; "
                     f"Durchschnittliche Geschwindigkeit: {speed_kmh:.2f} km/h"
                 )
 
@@ -340,7 +347,6 @@ class WegeRadar:
                         key=lambda x: x[1],
                         reverse=True,
                     )
-                    # alle Modi anzeigen (auch 0 %)
                     rank_str = " │ ".join(f"{m} {s*100:.0f} %" for m, s in rank_items)
                     line2 = f"Verkehrsmittel: {rank_str}"
 
