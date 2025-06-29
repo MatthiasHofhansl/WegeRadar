@@ -1,36 +1,18 @@
-"""
-benutzeroberfläche.py
-=====================
-
-Tk-Oberfläche für WegeRadar.
-
-* Orts-/Weg-Liste scrollt separat.
-* Schwarze Linie bis ganz rechts.
-* Datum-Label bündig zu „Teilnehmer(in):“.
-* Pro Weg zwei Zeilen:
-    Zeile 1: Weg … │ Dauer …; Distanz …; Durchschnittliche Geschwindigkeit …
-    Zeile 2: Verkehrsmittel: <Ranking>
-"""
-
+# benutzeroberfläche.py
 from __future__ import annotations
 
-import os, threading, tkinter as tk
+import os
+import threading
+import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
-from math import radians, cos, sin, asin, sqrt
-import importlib, algorithm
+import importlib
+
+import algorithm
 
 APP_NAME = "WegeRadar"
 
 
-def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    lat1, lon1, lat2, lon2 = map(radians, (lat1, lon1, lat2, lon2))
-    dlat, dlon = lat2 - lat1, lon2 - lon1
-    a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
-    return 6371.0 * 2 * asin(sqrt(a))
-
-
 class WegeRadar:
-    # ------------------------------------------------------------------- #
     def __init__(self, master: tk.Tk) -> None:
         self.master = master
         master.title(APP_NAME)
@@ -40,8 +22,19 @@ class WegeRadar:
         master.geometry(f"{win_w}x{win_h}+{(sw - win_w) // 2}+{(sh - win_h) // 2}")
         master.resizable(True, True)
 
-        self.window_width: int = win_w
+        # Pfad zum GPX-Ordner
         self.gpx_path: str | None = None
+
+        # Hier speichern wir die 6 ausgewählten GeoJSON-Dateien eindeutig:
+        # { "Auto": <Pfad>, "Zu Fuß": <Pfad>, "Fahrrad": <Pfad>, "Bus": <Pfad>, "Straßenbahn": <Pfad>, "Zug": <Pfad> }
+        self.osm_selections: dict[str, str | None] = {
+            "Auto": None,
+            "Zu Fuß": None,
+            "Fahrrad": None,
+            "Bus": None,
+            "Straßenbahn": None,
+            "Zug": None,
+        }
 
         self.static_frame: tk.Frame | None = None
         self.list_canvas: tk.Canvas | None = None
@@ -50,12 +43,12 @@ class WegeRadar:
 
         self.setup_ui()
 
-    # ---------------- Start-UI ---------------- #
     def setup_ui(self) -> None:
         tk.Label(
             self.master, text="Herzlich Willkommen!", font=("Arial", 24, "bold")
         ).pack(pady=(10, 3))
 
+        # GPX-Ordner auswählen
         gpx_frame = tk.Frame(self.master)
         gpx_frame.pack(fill="x", padx=20, pady=(5, 0), anchor="w")
 
@@ -74,10 +67,33 @@ class WegeRadar:
         )
 
         self.gpx_label = tk.Label(
-            row, text="Keinen Ordner ausgewählt.", font=("Arial", 12), anchor="center"
+            row,
+            text="Keinen Ordner ausgewählt.",
+            font=("Arial", 12),
+            anchor="center"
         )
         self.gpx_label.grid(row=0, column=1, sticky="ew")
 
+        # Für GeoJSON-Dateien ist jetzt ein eigener Button, der ein neues Fenster öffnet
+        osm_frame = tk.Frame(self.master)
+        osm_frame.pack(fill="x", padx=20, pady=(20, 0), anchor="center")
+
+        tk.Button(
+            osm_frame,
+            text="GeoJSON-Dateien auswählen",
+            width=25,
+            command=self.select_osm_dialog
+        ).pack(pady=(2, 0))
+
+        self.osm_label = tk.Label(
+            osm_frame,
+            text="Keine GeoJSON-Dateien ausgewählt.",
+            font=("Arial", 12),
+            anchor="center"
+        )
+        self.osm_label.pack()
+
+        # "Start"-Button
         tk.Button(
             self.master,
             text="Start",
@@ -86,15 +102,151 @@ class WegeRadar:
             height=2,
         ).pack(side="bottom", fill="x", pady=(2, 0))
 
-    # ---------------- Ordnerauswahl ---------- #
     def select_gpx(self) -> None:
+        """Wählt einen Ordner mit GPX-Dateien aus."""
         p = filedialog.askdirectory(title="Ordner mit den GPX-Dateien auswählen")
         if p:
             self.gpx_path = p
             self.gpx_label.config(text=os.path.basename(p))
 
-    # ---------------- Hauptansicht ----------- #
+    def select_osm_dialog(self) -> None:
+        """
+        Öffnet ein neues Fenster, in dem für jedes Verkehrsmittel (Auto, Zu Fuß usw.)
+        einzeln eine GeoJSON-Datei ausgewählt wird.
+        
+        Dabei wird die Höhe des Fensters nachträglich so vergrößert, dass alle Buttons
+        plus der OK-Button sichtbar werden. Die Breite und die zentrierte Position
+        auf dem Bildschirm bleiben erhalten.
+        """
+
+        # Erstellt ein Toplevel:
+        dlg = tk.Toplevel(self.master)
+        dlg.title("GeoJSON-Auswahl")
+        dlg.resizable(False, False)
+        dlg.transient(self.master)
+        dlg.grab_set()
+
+        # Der folgende Block sorgt in deinem Original-Code dafür, dass das Dialog-Fenster
+        # exakt die gleiche Größe und Position wie das Hauptfenster einnimmt.
+        # Wir übernehmen hier dieselbe Breite (w) und zentrieren wieder am Bildschirm,
+        # ändern aber die Höhe so, dass genügend Platz für Buttons und OK-Button ist.
+
+        self.master.update_idletasks()
+        # Größe des Hauptfensters
+        w = self.master.winfo_width()
+
+        # Temporär setzen wir eine erste Geometrie, damit dlg seine Inhalte berechnen kann
+        # (z.B. winfo_reqheight).
+        # Wir setzen hier erstmal eine Höhe = Höhe des Hauptfensters, nur als Start-Wert.
+        h_temp = self.master.winfo_height()
+
+        # Bildschirmbreite und -höhe
+        sw = self.master.winfo_screenwidth()
+        sh = self.master.winfo_screenheight()
+
+        # Toplevel zunächst vorläufig zentrieren
+        x = (sw - w) // 2
+        y = (sh - h_temp) // 2
+        dlg.geometry(f"{w}x{h_temp}+{x}+{y}")
+
+        # Überschrift
+        label_top = tk.Label(
+            dlg,
+            text="Bitte wähle hier die GeoJSON-Dateien aus deinem Gebiet aus!",
+            font=("Arial", 10, "bold")
+        )
+        label_top.pack(pady=(15, 10))
+
+        # Frame für die Verkehrsmittel
+        modes_frame = tk.Frame(dlg)
+        modes_frame.pack(expand=True, fill="both")
+
+        # Für jeden Modus eine Zeile anlegen
+        self.osm_entry_labels = {}
+        for mode in self.osm_selections:
+            row_frame = tk.Frame(modes_frame)
+            row_frame.pack(fill="x", pady=5)
+
+            label_mode = tk.Label(row_frame, text=f"{mode}:", font=("Arial", 12))
+            label_mode.pack(side="left", padx=20)
+
+            # Label, das den gewählten Pfad anzeigt
+            lbl_path = tk.Label(
+                row_frame,
+                text="Keine Datei ausgewählt",
+                font=("Arial", 12),
+                anchor="w"
+            )
+            lbl_path.pack(side="left", padx=10)
+            self.osm_entry_labels[mode] = lbl_path
+
+            # Auswählen-Button
+            def make_handler(m=mode):
+                return lambda: self._choose_osm_file(m)
+            btn = tk.Button(row_frame, text="Auswählen", font=("Arial", 12), command=make_handler(mode))
+            btn.pack(side="right", padx=20)
+
+        # OK-Button unten zentriert
+        btn_ok = tk.Button(
+            dlg, text="OK", font=("Arial", 14), width=10,
+            command=lambda: self._osm_ok(dlg)
+        )
+        btn_ok.pack(pady=20)
+
+        # Jetzt schauen wir, wie groß das dlg *wirklich* sein muss,
+        # damit alle Buttons und der OK-Button Platz haben.
+        dlg.update_idletasks()
+        needed_h = dlg.winfo_reqheight()
+
+        # Breite (w) bleibt wie oben ermittelt, wir ändern nur die Höhe, falls nötig:
+        final_h = max(h_temp, needed_h)  # so gehen wir sicher, dass es nicht kleiner wird als vorher
+
+        # Jetzt zentrieren wir das Fenster erneut am Bildschirm:
+        new_x = (sw - w) // 2
+        new_y = (sh - final_h) // 2
+        dlg.geometry(f"{w}x{final_h}+{new_x}+{new_y}")
+
+    def _choose_osm_file(self, mode: str) -> None:
+        """Öffnet einen Dateidialog, um eine einzelne *.geojson-Datei zu wählen."""
+        path = filedialog.askopenfilename(
+            title=f"Datei für {mode} auswählen",
+            filetypes=[("GeoJSON", "*.geojson"), ("Alle Dateien", "*.*")]
+        )
+        if path:
+            # Pfad merken und Anzeige aktualisieren
+            self.osm_selections[mode] = path
+            if mode in self.osm_entry_labels:
+                basename = os.path.basename(path)
+                self.osm_entry_labels[mode].config(text=basename)
+
+    def _osm_ok(self, dlg: tk.Toplevel) -> None:
+        """
+        Wird aufgerufen, wenn man im OSM-Auswahl-Fenster "OK" drückt.
+        Prüft, ob alle 6 Dateien gewählt wurden. Wenn ja, schließt das Fenster.
+        """
+        missing = [m for m, path in self.osm_selections.items() if not path]
+        if missing:
+            msg = (
+                "Bitte wähle für alle Verkehrsmittel eine GeoJSON-Datei.\n"
+                f"Fehlend: {', '.join(missing)}"
+            )
+            messagebox.showwarning(APP_NAME, msg, parent=dlg)
+            return
+
+        # Jetzt ist alles da, Fenster schließen
+        dlg.destroy()
+
+        # Aktualisiere Anzeige im Hauptfenster
+        texts = []
+        for m in self.osm_selections:
+            texts.append(f"{m}: {os.path.basename(self.osm_selections[m])}")
+        self.osm_label.config(text="\n".join(texts))
+
     def start_action(self) -> None:
+        """
+        Wird aufgerufen, wenn man auf "Start" klickt.
+        Prüft, ob GPX-Ordner und alle 6 OSM-Dateien gewählt wurden.
+        """
         if not self.gpx_path:
             messagebox.showwarning(
                 APP_NAME,
@@ -103,6 +255,16 @@ class WegeRadar:
             )
             return
 
+        # Prüfen, ob alle 6 GeoJSON-Files gesetzt sind
+        if not all(self.osm_selections.values()):
+            messagebox.showwarning(
+                APP_NAME,
+                "Bitte gib für alle 6 Verkehrsmittel je eine GeoJSON-Datei an.",
+                parent=self.master,
+            )
+            return
+
+        # UI leeren und Hauptansicht aufbauen
         for w in self.master.winfo_children():
             w.destroy()
         self.master.configure(bg="white")
@@ -162,8 +324,13 @@ class WegeRadar:
         ).pack(pady=(10, 5))
 
         files = [f for f in os.listdir(self.gpx_path) if f.lower().endswith(".gpx")]
+        # Grob: "<Nachname>_<Vorname>_<Datum>.gpx"
         names = sorted(
-            {(f.split("_")[0], f.split("_")[1]) for f in files if len(f.split("_")) >= 3},
+            {
+                (f.split("_")[0], f.split("_")[1])
+                for f in files
+                if len(f.split("_")) >= 3
+            },
             key=lambda x: x[0],
         )
 
@@ -183,8 +350,8 @@ class WegeRadar:
             lbl.bind("<Leave>", lambda e, l=lbl: l.config(bg="white"))
             lbl.bind("<Button-1>", lambda e, l=last, f=first: self.on_name_click(l, f))
 
-    # ---------------- Analyse starten ------- #
     def on_name_click(self, last: str, first: str) -> None:
+        """Wird aufgerufen, wenn man auf einen Namen in der Teilnehmerliste klickt und die Analyse startet."""
         for w in self.static_frame.winfo_children():
             w.destroy()
         for w in self.list_inner.winfo_children():
@@ -214,11 +381,18 @@ class WegeRadar:
             ],
         ).pack(side="right", padx=10, pady=5)
 
+        # Algorithmus neu laden
         importlib.reload(algorithm)
+
+        # OSM-Daten laden
+        algorithm.load_osm_data(self.osm_selections)
+
+        # Dialog zum Datum
         date = algorithm.show_date_dialog(self.master, self.gpx_path, last, first)
         if not date:
             return
 
+        # Loader-Fenster
         loader = tk.Toplevel(self.master)
         loader.title("Bitte warten…")
         loader.resizable(False, False)
@@ -241,7 +415,6 @@ class WegeRadar:
 
         threading.Thread(target=run, daemon=True).start()
 
-    # ---------------- Orte anzeigen ------- #
     def show_stops(
         self,
         loader: tk.Toplevel,
@@ -249,6 +422,7 @@ class WegeRadar:
         date: str,
         places: list[dict],
     ) -> None:
+        """Zeigt die ermittelten Orte/Wegabschnitte der gewählten Person + Datum an."""
         prog.stop()
         loader.destroy()
 
@@ -271,6 +445,14 @@ class WegeRadar:
                 anchor="w",
             ).pack(fill="x", padx=20, pady=5)
             return
+
+        from math import radians, cos, sin, asin, sqrt
+
+        def _haversine_km(lat1, lon1, lat2, lon2):
+            lat1, lon1, lat2, lon2 = map(radians, (lat1, lon1, lat2, lon2))
+            dlat, dlon = lat2 - lat1, lon2 - lon1
+            a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
+            return 6371.0 * 2 * asin(sqrt(a))
 
         for idx, p in enumerate(places, 1):
             start = p["start_dt"].strftime("%H:%M")
@@ -300,12 +482,9 @@ class WegeRadar:
                 font=("Arial", 12),
                 bg="white",
                 anchor="w",
-                wraplength=self.window_width * 2,
+                wraplength=1000,
             ).pack(fill="x", padx=20, pady=5)
 
-            # ----------------------------------------------------------
-            # Distanz, Dauer, Geschwindigkeit & Verkehrsmittel
-            # ----------------------------------------------------------
             if idx < len(places):
                 nxt = places[idx]
                 dist_km = p.get("next_dist_km_real")
@@ -313,7 +492,6 @@ class WegeRadar:
 
                 if dist_km is None:
                     dist_km = _haversine_km(p["lat"], p["lon"], nxt["lat"], nxt["lon"])
-
                 duration_sec = (nxt["start_dt"] - p["end_dt"]).total_seconds()
                 d_h = int(duration_sec // 3600)
                 d_m = int((duration_sec % 3600) // 60)
@@ -323,7 +501,6 @@ class WegeRadar:
                     hours = duration_sec / 3600
                     speed_kmh = dist_km / hours if hours > 0 else 0.0
 
-                # Zeile 1: Weg, Dauer, Distanz, Tempo
                 prefix = f"Weg {idx} │ "
                 line1 = (
                     f"{prefix}Dauer: {duration_str}; "
@@ -339,7 +516,6 @@ class WegeRadar:
                     anchor="w",
                 ).pack(fill="x", padx=40, pady=(0, 1))
 
-                # Zeile 2: Verkehrsmittel-Ranking
                 mode_rank = p.get("next_mode_rank")
                 if mode_rank:
                     rank_items = sorted(
@@ -357,10 +533,3 @@ class WegeRadar:
                         bg="white",
                         anchor="w",
                     ).pack(fill="x", padx=40, pady=(0, 5))
-
-
-# --------------------------------------------------------------------------- #
-if __name__ == "__main__":
-    root = tk.Tk()
-    WegeRadar(root)
-    root.mainloop()
