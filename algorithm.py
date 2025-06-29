@@ -1,23 +1,24 @@
-"""
-algorithm.py
-============
-
-Erkennt Aufenthalts-Orte in einer GPX-Spur, verschmilzt benachbarte Stops,
-reichert sie mit Adressdaten an und bestimmt für jede Weg-Etappe ein
-Ranking des wahrscheinlich genutzten Verkehrsmittels.
-
-Für jeden Aufenthalt speichert das Skript:
-    • Koordinaten lat / lon
-    • Start- und End-Zeit (Europe/Berlin)
-    • Name, Straße, Haus-Nr., PLZ, Stadt (per Nominatim)
-
-Für jede Weg-Etappe (Stop i → Stop i+1):
-    • next_dist_km_real       Distanz entlang der GPX-Punkte
-    • next_speed_kmh_real     Durchschnittsgeschwindigkeit
-    • next_mode_rank          Score-Dict inkl. 'best'
-"""
-
 from __future__ import annotations
+"""
+algorithm.py (überarbeitet)
+===========================
+
+*Alle* bisherigen Funktionen bleiben erhalten; zusätzlich wird jetzt der neue
+ML‑/Heuristik‑Klassifikator aus ``algorithm_ml`` verwendet.  Die frühere
+``classify_transport``‑Funktion ist unverändert im Code – falls du sie später
+als Fallback oder für A/B‑Vergleiche brauchst.
+
+Änderungen in Kürze
+------------------
+1. **Import**
+   ``from algorithm_ml import classify_transport as classify_transport_ml``
+2. **analyze_gpx()**
+   • sammelt ``seg_times`` für jedes Weg‑Segment.
+   • ruft ``classify_transport_ml`` auf und speichert dessen Ergebnis unter
+     ``next_mode_rank``.
+
+Sonst blieb alles unberührt.
+"""
 
 # --------------------------------------------------------------------------- #
 # Standard-Bibliotheken
@@ -36,10 +37,18 @@ import gpxpy
 import requests
 import osmnx as ox                       # Overpass-/OSM-Zugriff
 from shapely.geometry import Point
+
 try:
     import rtree                         # optional, beschleunigt Spatial-Index
-except ImportError:
+except ImportError:  # pragma: no cover
     pass
+
+# --------------------------------------------------------------------------- #
+# Neuer Klassifikator (offline, ML + Heuristik)
+# --------------------------------------------------------------------------- #
+from algorithm_ml import (
+    classify_transport as classify_transport_ml,  # alias, um Kollision zu vermeiden
+)
 
 # --------------------------------------------------------------------------- #
 # Zeitzone
@@ -63,10 +72,8 @@ MERGE_DIST_M           = 150            # Radius bei Punkt 6
 SNAP_RADIUS_M          = 10             # Punkt ↔ Netz (Klassifizierung) in m
 
 # --------------------------------------------------------------------------- #
-# Verkehrsmittel-Klassifizierung (deutsche Bezeichnungen)
+# Verkehrsmittel-Klassifizierung (alte heuristische Variante)
 # --------------------------------------------------------------------------- #
-# Typische Geschwindigkeitsbereiche (km/h) – Kernbereich.
-# Um Messfehler abzufangen, gibt es ±1 km/h „weiche“ Übergänge.
 _SPEED_BANDS = {
     "Zu Fuß":       (0,  7),
     "Fahrrad":      (7,  30),
@@ -77,7 +84,6 @@ _SPEED_BANDS = {
 }
 _MARGIN_KMH = 1.0                       # weicher Übergang um jede Band-Grenze
 
-# OSM-Tag-Filter je Modus
 _TAG_FILTERS = {
     "Zu Fuß":      {"highway": ["footway", "pedestrian", "path", "living_street"]},
     "Fahrrad":     {"highway": ["cycleway"]},
@@ -91,10 +97,7 @@ _TAG_FILTERS = {
 
 
 def _speed_score(speed_kmh: float, mode: str) -> float:
-    """
-    Geschwindigkeits-Score ∈[0,1] mit weichem Übergang (±1 km/h).
-    Innerhalb des Kernbandes = 1, außerhalb ±Margin linear abfallend.
-    """
+    """Geschwindigkeits-Score ∈[0,1] mit weichem Übergang (±1 km/h)."""
     lo, hi = _SPEED_BANDS[mode]
     if speed_kmh <= lo - _MARGIN_KMH or speed_kmh >= hi + _MARGIN_KMH:
         return 0.0
@@ -108,8 +111,7 @@ def _speed_score(speed_kmh: float, mode: str) -> float:
 
 
 @lru_cache(maxsize=128)
-def _load_osm(bbox: tuple[float, float, float, float],
-              tags: dict) -> ox.geometries.geopandas.GeoDataFrame:  # type: ignore
+def _load_osm(bbox: tuple[float, float, float, float], tags: dict) -> ox.geometries.geopandas.GeoDataFrame:  # type: ignore
     """Lädt OSM-Geometrien für eine Bounding-Box (north, south, east, west)."""
     north, south, east, west = bbox
     return ox.geometries_from_bbox(north, south, east, west, tags)
@@ -130,14 +132,11 @@ def _foot_distance_factor(dist_km: float) -> float:
 
 
 def classify_transport(
-    seg_pts: list[tuple[float, float]],
+    seg_pts: List[Tuple[float, float]],
     speed_kmh: float,
     dist_km: float,
 ) -> dict:
-    """
-    Liefert z. B.:
-        {"Straßenbahn": 0.78, "Bus": 0.15, … , "best": "Straßenbahn"}
-    """
+    """Alte Heuristik – weiter im Code belassen (A/B‑Tests etc.)."""
     if not seg_pts:
         return {"best": None}
 
@@ -146,7 +145,7 @@ def classify_transport(
     east,  west  = max(lons) + 0.001, min(lons) - 0.001
     bbox = (north, south, east, west)
 
-    scores: dict[str, float] = {}
+    scores: Dict[str, float] = {}
     for mode, tag_filter in _TAG_FILTERS.items():
         # 1) Geschwindigkeits-Score
         s_score = _speed_score(speed_kmh, mode)
@@ -192,6 +191,7 @@ def classify_transport(
 # --------------------------------------------------------------------------- #
 # Hilfsfunktionen
 # --------------------------------------------------------------------------- #
+
 def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Großkreis-Distanz in Metern zwischen zwei Koordinaten."""
     lat1, lon1, lat2, lon2 = map(radians, (lat1, lon1, lat2, lon2))
@@ -274,6 +274,7 @@ def _same_address(a: dict, b: dict) -> bool:
 # --------------------------------------------------------------------------- #
 # Dateiauswahl-Dialog (GUI-Helfer)
 # --------------------------------------------------------------------------- #
+
 def show_date_dialog(master, gpx_folder: str, last: str, first: str) -> str | None:
     prefix = f"{last}_{first}_"
     files = [
@@ -299,7 +300,7 @@ def show_date_dialog(master, gpx_folder: str, last: str, first: str) -> str | No
     dlg.grab_set()
 
     tk.Label(dlg, text="Bitte Datum wählen:", font=("Arial", 12)).pack(pady=10)
-    sel: dict[str | None] = {"d": None}
+    sel: Dict[str | None] = {"d": None}
 
     def choose(d: str):
         sel["d"] = d
@@ -320,6 +321,7 @@ def show_date_dialog(master, gpx_folder: str, last: str, first: str) -> str | No
 # --------------------------------------------------------------------------- #
 # Hauptfunktion – Analyse & Aufbereitung
 # --------------------------------------------------------------------------- #
+
 def analyze_gpx(
     gpx_folder: str,
     last: str,
@@ -462,16 +464,24 @@ def analyze_gpx(
         if speed_kmh is not None:
             final[idx]["next_speed_kmh_real"] = speed_kmh
 
-        # Verkehrsmittel-Ranking
+        # -----------------------------
+        # Neue ML-/Heuristik-Klassifikation
+        # -----------------------------
         seg_pts = [
             (lat, lon)
             for t, lat, lon in pts
             if end_prev_utc <= t <= start_next_utc
         ]
-        final[idx]["next_mode_rank"] = classify_transport(
-            seg_pts,
-            speed_kmh or 0.0,
-            dist_km,
+        seg_times = [
+            t.astimezone(BERLIN)
+            for t, lat, lon in pts
+            if end_prev_utc <= t <= start_next_utc
+        ]
+
+        final[idx]["next_mode_rank"] = classify_transport_ml(
+            seg_times,
+            [lat for lat, _ in seg_pts],
+            [lon for _, lon in seg_pts],
         )
 
     return final
