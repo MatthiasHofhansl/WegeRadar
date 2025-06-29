@@ -11,7 +11,7 @@ Für jeden Aufenthalt speichert das Skript:
     • Start- und End-Zeit (Europe/Berlin)
     • Name, Straße, Haus-Nr., PLZ, Stadt (per Nominatim)
 
-Für jede Weg-Etappe (Stop i  →  Stop i+1):
+Für jede Weg-Etappe (Stop i → Stop i+1):
     • next_dist_km_real       (Distanz entlang der GPX-Punkte)
     • next_speed_kmh_real     (Durchschnittsgeschwindigkeit)
     • next_mode_rank          (Score-Dict inkl. 'best')
@@ -37,7 +37,7 @@ import requests
 import osmnx as ox                       # Overpass-/OSM-Zugriff
 from shapely.geometry import Point
 try:
-    import rtree  # optional, beschleunigt Spatial-Index
+    import rtree                         # optional, beschleunigt Spatial-Index
 except ImportError:
     pass
 
@@ -63,33 +63,33 @@ MERGE_DIST_M           = 150           # Radius bei Punkt 6
 SNAP_RADIUS_M          = 10            # Punkt ↔ Netz (Klassifizierung) in m
 
 # --------------------------------------------------------------------------- #
-# Verkehrsmittel-Klassifizierung
+# Verkehrsmittel-Klassifizierung (deutsche Bezeichnungen)
 # --------------------------------------------------------------------------- #
-# typische Geschwindigkeits­bereiche (km/h)
+# typische Geschwindigkeitsbereiche (km/h)
 _SPEED_BANDS = {
-    "Zu Fuß": (0, 9),
-    "Fahhrad": (9, 30),
-    "Auto":  (30, 120),
-    "Bus":  (15, 70),
-    "Straßenbahn": (15, 70),
-    "Zug": (40, 250),
+    "Zu Fuß":       (0, 9),
+    "Fahrrad":      (9, 30),
+    "Auto":         (30, 120),
+    "Bus":          (15, 70),
+    "Straßenbahn":  (15, 70),
+    "Zug":          (40, 250),
 }
 
 # OSM-Tag-Filter je Modus
 _TAG_FILTERS = {
-    "foot": {"highway": ["footway", "pedestrian", "path", "living_street"]},
-    "bike": {"highway": ["cycleway"]},
-    "car":  {"highway": ["motorway", "trunk", "primary", "secondary",
-                         "tertiary", "unclassified", "residential", "service"]},
-    "bus":  {"highway": ["busway", "bus_guideway", "primary", "secondary",
-                         "tertiary", "unclassified", "residential"]},
-    "tram": {"railway": ["tram"]},
-    "rail": {"railway": ["rail", "light_rail", "subway"]},
+    "Zu Fuß":      {"highway": ["footway", "pedestrian", "path", "living_street"]},
+    "Fahrrad":     {"highway": ["cycleway"]},
+    "Auto":        {"highway": ["motorway", "trunk", "primary", "secondary",
+                                "tertiary", "unclassified", "residential", "service"]},
+    "Bus":         {"highway": ["busway", "bus_guideway", "primary", "secondary",
+                                "tertiary", "unclassified", "residential"]},
+    "Straßenbahn": {"railway": ["tram"]},
+    "Zug":         {"railway": ["rail", "light_rail", "subway"]},
 }
 
 
 def _speed_score(speed_kmh: float, mode: str) -> float:
-    """Linear normierter Geschwindigkeits-Score ∈[0, 1]."""
+    """Linear normierter Geschwindigkeits-Score ∈ [0, 1]."""
     lo, hi = _SPEED_BANDS[mode]
     if speed_kmh <= lo:
         return 0.0
@@ -110,14 +110,13 @@ def classify_transport(seg_pts: list[tuple[float, float]],
                        speed_kmh: float) -> dict:
     """
     Liefert z. B.:
-        {"tram": 0.82, "bus": 0.13, "bike": 0.05, "best": "tram"}
+        {"Straßenbahn": 0.82, "Bus": 0.13, "Fahrrad": 0.05, "best": "Straßenbahn"}
     """
     if not seg_pts:
         return {"best": None}
 
     lats, lons = zip(*seg_pts)
-    # kleine Pufferung (≈100 m) für Overpass-Abfrage
-    north, south = max(lats) + 0.001, min(lats) - 0.001
+    north, south = max(lats) + 0.001, min(lats) - 0.001   # Puffer ≈ 100 m
     east,  west  = max(lons) + 0.001, min(lons) - 0.001
     bbox = (north, south, east, west)
 
@@ -134,7 +133,7 @@ def classify_transport(seg_pts: list[tuple[float, float]],
             else:
                 idx = gdf.sindex
                 match = 0
-                buf_deg = SNAP_RADIUS_M / 111_320  # Meter → Grad
+                buf_deg = SNAP_RADIUS_M / 111_320
                 for lat, lon in seg_pts:
                     pt = Point(lon, lat)
                     cand = list(idx.intersection(pt.buffer(buf_deg).bounds))
@@ -144,7 +143,7 @@ def classify_transport(seg_pts: list[tuple[float, float]],
                             match += 1
                 c_score = match / len(seg_pts)
         except Exception:
-            c_score = 0.0   # z. B. Timeout
+            c_score = 0.0
 
         # 3) kombinierter Score
         scores[mode] = 0.4 * s_score + 0.6 * c_score
@@ -162,7 +161,7 @@ def classify_transport(seg_pts: list[tuple[float, float]],
 # Hilfsfunktionen
 # --------------------------------------------------------------------------- #
 def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Großkreis-Distanz in m zwischen zwei Koordinaten."""
+    """Großkreis-Distanz in Metern zwischen zwei Koordinaten."""
     lat1, lon1, lat2, lon2 = map(radians, (lat1, lon1, lat2, lon2))
     dlat, dlon = lat2 - lat1, lon2 - lon1
     a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
@@ -191,7 +190,7 @@ def _extract_name(js: dict) -> str:
 
 def reverse_geocode(lat: float, lon: float) -> Dict[str, str]:
     """Adress-Dict für die Koordinate; benutzt Cache + Nominatim."""
-    key = (round(lat, 5), round(lon, 5))   # ≈1 m
+    key = (round(lat, 5), round(lon, 5))   # ≈ 1 m
     if key in _GEOCACHE:
         return _GEOCACHE[key]
 
