@@ -8,7 +8,6 @@ from typing import Dict, List, Tuple
 
 import gpxpy
 import requests
-from algorithm_ml import classify_transport as classify_transport_ml
 
 try:
     from zoneinfo import ZoneInfo
@@ -23,6 +22,77 @@ MIN_STOP_DURATION_SEC = 180
 NOMINATIM_SLEEP_SEC = 1
 MAX_GAP_SEC_SAME_ADDR = 600
 MERGE_DIST_M = 150
+
+# ---- Verkehrsmittel-Heuristik ---------------------------------------------
+
+_SPEED_BANDS = {
+    "Zu Fuß":       (0,  7),
+    "Fahrrad":      (7,  30),
+    "Auto":         (24, 300),
+    "Bus":          (15, 90),
+    "Straßenbahn":  (15, 90),
+    "Zug":          (40, 250),
+}
+_MARGIN_KMH = 1.0
+
+_TAG_FILTERS = {
+    "Zu Fuß":      {"highway": ["footway", "pedestrian", "path", "living_street"]},
+    "Fahrrad":     {"highway": ["cycleway"]},
+    "Auto":        {"highway": ["motorway", "trunk", "primary", "secondary",
+                                "tertiary", "unclassified", "residential", "service"]},
+    "Bus":         {"highway": ["busway", "bus_guideway", "primary", "secondary",
+                                "tertiary", "unclassified", "residential"]},
+    "Straßenbahn": {"railway": ["tram"]},
+    "Zug":         {"railway": ["rail", "light_rail", "subway"]},
+}
+
+def _speed_score(speed_kmh: float, mode: str) -> float:
+    lo, hi = _SPEED_BANDS[mode]
+    if speed_kmh <= lo - _MARGIN_KMH or speed_kmh >= hi + _MARGIN_KMH:
+        return 0.0
+    if lo <= speed_kmh <= hi:
+        return 1.0
+    if lo - _MARGIN_KMH < speed_kmh < lo:
+        return (speed_kmh - (lo - _MARGIN_KMH)) / _MARGIN_KMH
+    if hi < speed_kmh < hi + _MARGIN_KMH:
+        return ((hi + _MARGIN_KMH) - speed_kmh) / _MARGIN_KMH
+    return 0.0
+
+def _foot_distance_factor(dist_km: float) -> float:
+    if dist_km <= 1.0:
+        return 1.0
+    if dist_km >= 4.0:
+        return 0.0
+    return (4.0 - dist_km) / 3.0
+
+def classify_transport(
+    seg_pts: List[Tuple[float, float]],
+    speed_kmh: float,
+    dist_km: float,
+) -> dict:
+    if not seg_pts:
+        return {"best": None}
+
+    # Nur Geschwindigkeit & Distanz für Heuristik
+    scores: Dict[str, float] = {}
+    for mode in _SPEED_BANDS:
+        s_score = _speed_score(speed_kmh, mode)
+        score = s_score
+
+        if mode == "Zu Fuß":
+            score *= _foot_distance_factor(dist_km)
+
+        scores[mode] = score
+
+    # normieren
+    tot = sum(scores.values()) or 1.0
+    for k in scores:
+        scores[k] /= tot
+
+    scores["best"] = max(scores, key=lambda m: scores[m])
+    return scores
+
+# ---- Geo/Adressen-Tools ---------------------------------------------------
 
 _NOMINATIM = "https://nominatim.openstreetmap.org/reverse"
 _HDRS = {"User-Agent": "WegeRadar/1.0 (kontakt@example.com)"}
@@ -246,21 +316,14 @@ def analyze_gpx(
             for t, lat, lon in pts
             if end_prev_utc <= t <= start_next_utc
         ]
-        seg_times = [
-            t.astimezone(BERLIN)
-            for t, lat, lon in pts
-            if end_prev_utc <= t <= start_next_utc
-        ]
 
-        final[idx]["next_mode_rank"] = classify_transport_ml(
-            seg_times,
-            [lat for lat, _ in seg_pts],
-            [lon for _, lon in seg_pts],
+        final[idx]["next_mode_rank"] = classify_transport(
+            seg_pts,
+            speed_kmh or 0.0,
+            dist_km
         )
 
-        # -----------------------------
-        # Analyse von Haltemustern
-        # -----------------------------
+        # Haltemuster wie gehabt
         HALT_SPEED_THRESHOLD = 3.0
         MIN_HALT_DURATION = 10
 
@@ -275,9 +338,9 @@ def analyze_gpx(
 
             dist_m = haversine(lat0, lon0, lat1, lon1)
             duration_s = (t1 - t0).total_seconds()
-            speed_kmh = (dist_m / duration_s) * 3.6 if duration_s > 0 else 0
+            speed_kmh_i = (dist_m / duration_s) * 3.6 if duration_s > 0 else 0
 
-            if speed_kmh <= HALT_SPEED_THRESHOLD:
+            if speed_kmh_i <= HALT_SPEED_THRESHOLD:
                 if halt_start is None:
                     halt_start = t0
             else:
