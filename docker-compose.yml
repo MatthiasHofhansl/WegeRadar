@@ -1,0 +1,64 @@
+version: "3.8"
+
+services:
+  osrm:
+    image: osrm/osrm-backend
+    command: >
+      sh -c "
+        echo '🚧 Baue OSRM-Index…' &&
+        osrm-extract -p /opt/car.lua /data/karlsruhe-regbez-latest.osm.pbf &&
+        osrm-partition /data/karlsruhe-regbez-latest.osm &&
+        osrm-customize /data/karlsruhe-regbez-latest.osm &&
+        echo '✅ Starte osrm-routed' &&
+        osrm-routed --algorithm mld /data/karlsruhe-regbez-latest.osm
+      "
+    volumes:
+      # nur die .pbf als Datei reinnehmen
+      - C:/osmdata/karlsruhe-regbez-latest.osm.pbf:/data/karlsruhe-regbez-latest.osm.pbf:ro
+      # separater Cache-Volume fürs Index
+      - osrm_cache:/data
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  overpass:
+    image: wiktorn/overpass-api
+    restart: unless-stopped
+    environment:
+      OVERPASS_MODE: "init"
+      OVERPASS_STOP_AFTER_INIT: "false"
+      # kein OVERPASS_DIFF_URL hier
+    volumes:
+      # benanntes Volume für alles, was Overpass schreiben muss
+      - overpass_db:/db
+      # und nur die eine .osm.bz2 als Datei read-only einhängen
+      - C:/osmdata/karlsruhe-regbez-latest.osm.bz2:/db/planet.osm.bz2:ro
+    ports:
+      - "80:80"
+
+  app:
+    build: .
+    depends_on:
+      osrm:
+        condition: service_healthy
+      overpass:
+        condition: service_healthy
+    environment:
+      OSRM_URL: "http://osrm:5000"
+      OVERPASS_URL: "http://overpass:80/api/interpreter"
+      GPX_DIR: "/app/gpx"
+      DISPLAY: "host.docker.internal:0.0"
+    volumes:
+      - ./gpx:/app/gpx
+      # Unter Windows brauchst du meist kein /tmp/.X11-unix mount
+    network_mode: "host"  # optional, vereinfacht Netzwerkzugriff
+    ports:
+      - "8080:8080"
+
+volumes:
+  osrm_cache:
+  overpass_db:
