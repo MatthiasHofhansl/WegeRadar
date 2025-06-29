@@ -1,28 +1,4 @@
 from __future__ import annotations
-"""
-algorithm.py (überarbeitet)
-===========================
-
-*Alle* bisherigen Funktionen bleiben erhalten; zusätzlich wird jetzt der neue
-ML‑/Heuristik‑Klassifikator aus ``algorithm_ml`` verwendet.  Die frühere
-``classify_transport``‑Funktion ist unverändert im Code – falls du sie später
-als Fallback oder für A/B‑Vergleiche brauchst.
-
-Änderungen in Kürze
-------------------
-1. **Import**
-   ``from algorithm_ml import classify_transport as classify_transport_ml``
-2. **analyze_gpx()**
-   • sammelt ``seg_times`` für jedes Weg‑Segment.
-   • ruft ``classify_transport_ml`` auf und speichert dessen Ergebnis unter
-     ``next_mode_rank``.
-
-Sonst blieb alles unberührt.
-"""
-
-# --------------------------------------------------------------------------- #
-# Standard-Bibliotheken
-# --------------------------------------------------------------------------- #
 import os
 import time
 from datetime import datetime, timezone
@@ -30,183 +6,33 @@ from functools import lru_cache
 from math import radians, cos, sin, asin, sqrt
 from typing import Dict, List, Tuple
 
-# --------------------------------------------------------------------------- #
-# Drittanbieter-Pakete
-# --------------------------------------------------------------------------- #
 import gpxpy
 import requests
-import osmnx as ox                       # Overpass-/OSM-Zugriff
-from shapely.geometry import Point
+from algorithm_ml import classify_transport as classify_transport_ml
 
 try:
-    import rtree                         # optional, beschleunigt Spatial-Index
-except ImportError:  # pragma: no cover
-    pass
-
-# --------------------------------------------------------------------------- #
-# Neuer Klassifikator (offline, ML + Heuristik)
-# --------------------------------------------------------------------------- #
-from algorithm_ml import (
-    classify_transport as classify_transport_ml,  # alias, um Kollision zu vermeiden
-)
-
-# --------------------------------------------------------------------------- #
-# Zeitzone
-# --------------------------------------------------------------------------- #
-try:
-    from zoneinfo import ZoneInfo           # Py ≥ 3.9
-except ImportError:                         # Py 3.8
+    from zoneinfo import ZoneInfo
+except ImportError:
     from datetime import timezone as ZoneInfo  # type: ignore
     ZoneInfo = lambda tz: timezone.utc         # type: ignore
 
 BERLIN = ZoneInfo("Europe/Berlin")
 
-# --------------------------------------------------------------------------- #
-# Parameter
-# --------------------------------------------------------------------------- #
-DIST_THRESHOLD_M       = 50             # Radius fürs erste Stop-Clustering
-MIN_STOP_DURATION_SEC  = 180            # Mindest-Aufenthaltsdauer (3 min)
-NOMINATIM_SLEEP_SEC    = 1              # Wartezeit pro Geocode-Request
-MAX_GAP_SEC_SAME_ADDR  = 10 * 60        # Max. Lücke zw. identischen Stops
-MERGE_DIST_M           = 150            # Radius bei Punkt 6
-SNAP_RADIUS_M          = 10             # Punkt ↔ Netz (Klassifizierung) in m
+DIST_THRESHOLD_M = 50
+MIN_STOP_DURATION_SEC = 180
+NOMINATIM_SLEEP_SEC = 1
+MAX_GAP_SEC_SAME_ADDR = 600
+MERGE_DIST_M = 150
 
-# --------------------------------------------------------------------------- #
-# Verkehrsmittel-Klassifizierung (alte heuristische Variante)
-# --------------------------------------------------------------------------- #
-_SPEED_BANDS = {
-    "Zu Fuß":       (0,  7),
-    "Fahrrad":      (7,  30),
-    "Auto":         (24, 300),
-    "Bus":          (15, 90),
-    "Straßenbahn":  (15, 90),
-    "Zug":          (40, 250),
-}
-_MARGIN_KMH = 1.0                       # weicher Übergang um jede Band-Grenze
-
-_TAG_FILTERS = {
-    "Zu Fuß":      {"highway": ["footway", "pedestrian", "path", "living_street"]},
-    "Fahrrad":     {"highway": ["cycleway"]},
-    "Auto":        {"highway": ["motorway", "trunk", "primary", "secondary",
-                                "tertiary", "unclassified", "residential", "service"]},
-    "Bus":         {"highway": ["busway", "bus_guideway", "primary", "secondary",
-                                "tertiary", "unclassified", "residential"]},
-    "Straßenbahn": {"railway": ["tram"]},
-    "Zug":         {"railway": ["rail", "light_rail", "subway"]},
-}
-
-
-def _speed_score(speed_kmh: float, mode: str) -> float:
-    """Geschwindigkeits-Score ∈[0,1] mit weichem Übergang (±1 km/h)."""
-    lo, hi = _SPEED_BANDS[mode]
-    if speed_kmh <= lo - _MARGIN_KMH or speed_kmh >= hi + _MARGIN_KMH:
-        return 0.0
-    if lo <= speed_kmh <= hi:
-        return 1.0
-    if lo - _MARGIN_KMH < speed_kmh < lo:
-        return (speed_kmh - (lo - _MARGIN_KMH)) / _MARGIN_KMH
-    if hi < speed_kmh < hi + _MARGIN_KMH:
-        return ((hi + _MARGIN_KMH) - speed_kmh) / _MARGIN_KMH
-    return 0.0
-
-
-@lru_cache(maxsize=128)
-def _load_osm(bbox: tuple[float, float, float, float], tags: dict) -> ox.geometries.geopandas.GeoDataFrame:  # type: ignore
-    """Lädt OSM-Geometrien für eine Bounding-Box (north, south, east, west)."""
-    north, south, east, west = bbox
-    return ox.geometries_from_bbox(north, south, east, west, tags)
-
-
-def _foot_distance_factor(dist_km: float) -> float:
-    """
-    Gewichtung für „Zu Fuß“:  
-    • bis 1 km      → Faktor 1  
-    • 1 km … 4 km   → linear fallend auf 0  
-    • > 4 km        → 0
-    """
-    if dist_km <= 1.0:
-        return 1.0
-    if dist_km >= 4.0:
-        return 0.0
-    return (4.0 - dist_km) / 3.0
-
-
-def classify_transport(
-    seg_pts: List[Tuple[float, float]],
-    speed_kmh: float,
-    dist_km: float,
-) -> dict:
-    """Alte Heuristik – weiter im Code belassen (A/B‑Tests etc.)."""
-    if not seg_pts:
-        return {"best": None}
-
-    lats, lons = zip(*seg_pts)
-    north, south = max(lats) + 0.001, min(lats) - 0.001   # Puffer ≈ 100 m
-    east,  west  = max(lons) + 0.001, min(lons) - 0.001
-    bbox = (north, south, east, west)
-
-    scores: Dict[str, float] = {}
-    for mode, tag_filter in _TAG_FILTERS.items():
-        # 1) Geschwindigkeits-Score
-        s_score = _speed_score(speed_kmh, mode)
-
-        # 2) Netz-Abdeckung
-        try:
-            gdf = _load_osm(bbox, tag_filter)
-            if gdf.empty:
-                c_score = 0.0
-            else:
-                idx = gdf.sindex
-                match = 0
-                buf_deg = SNAP_RADIUS_M / 111_320
-                for lat, lon in seg_pts:
-                    pt = Point(lon, lat)
-                    cand = list(idx.intersection(pt.buffer(buf_deg).bounds))
-                    if cand:
-                        nearest = gdf.iloc[cand].distance(pt).min() * 111_320
-                        if nearest <= SNAP_RADIUS_M:
-                            match += 1
-                c_score = match / len(seg_pts)
-        except Exception:
-            c_score = 0.0
-
-        # 3) kombinierter Score
-        score = 0.4 * s_score + 0.6 * c_score
-
-        # 4) Spezial: „Zu Fuß“ wird bei langen Distanzen gedämpft
-        if mode == "Zu Fuß":
-            score *= _foot_distance_factor(dist_km)
-
-        scores[mode] = score
-
-    # normieren
-    tot = sum(scores.values()) or 1.0
-    for k in scores:
-        scores[k] /= tot
-
-    scores["best"] = max(scores, key=lambda m: scores[m])
-    return scores
-
-
-# --------------------------------------------------------------------------- #
-# Hilfsfunktionen
-# --------------------------------------------------------------------------- #
+_NOMINATIM = "https://nominatim.openstreetmap.org/reverse"
+_HDRS = {"User-Agent": "WegeRadar/1.0 (kontakt@example.com)"}
+_GEOCACHE: Dict[Tuple[float, float], Dict[str, str]] = {}
 
 def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Großkreis-Distanz in Metern zwischen zwei Koordinaten."""
     lat1, lon1, lat2, lon2 = map(radians, (lat1, lon1, lat2, lon2))
     dlat, dlon = lat2 - lat1, lon2 - lon1
     a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
     return 6_371_000 * 2 * asin(sqrt(a))
-
-
-# --------------------------------------------------------------------------- #
-# Reverse-Geocoding mit Cache
-# --------------------------------------------------------------------------- #
-_NOMINATIM = "https://nominatim.openstreetmap.org/reverse"
-_HDRS      = {"User-Agent": "WegeRadar/1.0 (kontakt@example.com)"}
-_GEOCACHE: Dict[Tuple[float, float], Dict[str, str]] = {}
-
 
 def _extract_name(js: dict) -> str:
     if js.get("name"):
@@ -217,9 +43,8 @@ def _extract_name(js: dict) -> str:
             return addr[k]
     return ""
 
-
 def reverse_geocode(lat: float, lon: float) -> Dict[str, str]:
-    key = (round(lat, 5), round(lon, 5))   # ≈ 1 m
+    key = (round(lat, 5), round(lon, 5))
     if key in _GEOCACHE:
         return _GEOCACHE[key]
 
@@ -240,22 +65,13 @@ def reverse_geocode(lat: float, lon: float) -> Dict[str, str]:
         if r.status_code == 200:
             js = r.json()
             addr = js.get("address", {})
-            result.update(
-                {
-                    "name": _extract_name(js),
-                    "road": addr.get("road")
-                    or addr.get("pedestrian")
-                    or addr.get("footway")
-                    or "",
-                    "house_number": addr.get("house_number", ""),
-                    "postcode": addr.get("postcode", ""),
-                    "city": addr.get("city")
-                    or addr.get("town")
-                    or addr.get("village")
-                    or addr.get("hamlet")
-                    or "",
-                }
-            )
+            result.update({
+                "name": _extract_name(js),
+                "road": addr.get("road") or addr.get("pedestrian") or addr.get("footway") or "",
+                "house_number": addr.get("house_number", ""),
+                "postcode": addr.get("postcode", ""),
+                "city": addr.get("city") or addr.get("town") or addr.get("village") or addr.get("hamlet") or "",
+            })
     except Exception:
         pass
 
@@ -263,17 +79,11 @@ def reverse_geocode(lat: float, lon: float) -> Dict[str, str]:
     time.sleep(NOMINATIM_SLEEP_SEC)
     return result
 
-
 def _same_address(a: dict, b: dict) -> bool:
     for fld in ("name", "road", "house_number", "postcode", "city"):
         if a.get(fld, "") != b.get(fld, ""):
             return False
     return True
-
-
-# --------------------------------------------------------------------------- #
-# Dateiauswahl-Dialog (GUI-Helfer)
-# --------------------------------------------------------------------------- #
 
 def show_date_dialog(master, gpx_folder: str, last: str, first: str) -> str | None:
     prefix = f"{last}_{first}_"
@@ -317,11 +127,6 @@ def show_date_dialog(master, gpx_folder: str, last: str, first: str) -> str | No
     dlg.wait_window()
     return sel["d"]
 
-
-# --------------------------------------------------------------------------- #
-# Hauptfunktion – Analyse & Aufbereitung
-# --------------------------------------------------------------------------- #
-
 def analyze_gpx(
     gpx_folder: str,
     last: str,
@@ -330,15 +135,10 @@ def analyze_gpx(
     dist_m: int = DIST_THRESHOLD_M,
     min_stop_sec: int = MIN_STOP_DURATION_SEC,
 ) -> List[dict]:
-    """
-    Liest <last>_<first>_<date>.gpx, erzeugt Aufenthaltsorte, verschmilzt sie
-    und ergänzt Distanz, Geschwindigkeit & Verkehrsmittel-Ranking.
-    """
     path = os.path.join(gpx_folder, f"{last}_{first}_{date}.gpx")
     if not os.path.exists(path):
         return []
 
-    # ---- GPX einlesen ---------------------------------------------------- #
     with open(path, encoding="utf-8") as f:
         gpx = gpxpy.parse(f)
 
@@ -354,16 +154,11 @@ def analyze_gpx(
 
     pts.sort(key=lambda x: x[0])
 
-    # --------------------------------------------------------------------- #
-    # 1. Stop-Cluster finden
-    # --------------------------------------------------------------------- #
     clusters: List[Tuple[float, float, datetime, datetime]] = []
     i, n = 0, len(pts)
     while i < n:
         j = i + 1
-        while j < n and haversine(
-            pts[i][1], pts[i][2], pts[j][1], pts[j][2]
-        ) <= dist_m:
+        while j < n and haversine(pts[i][1], pts[i][2], pts[j][1], pts[j][2]) <= dist_m:
             j += 1
 
         duration = (pts[j - 1][0] - pts[i][0]).total_seconds()
@@ -375,46 +170,33 @@ def analyze_gpx(
         else:
             i += 1
 
-    # Start- und End-Punkt immer aufnehmen
     coords: List[Tuple[float, float, datetime, datetime]] = [
         (pts[0][1], pts[0][2], pts[0][0], pts[0][0]),
         *clusters,
         (pts[-1][1], pts[-1][2], pts[-1][0], pts[-1][0]),
     ]
 
-    # --------------------------------------------------------------------- #
-    # 2. Stops verschmelzen, wenn sie in derselben Minute enden/starten
-    # --------------------------------------------------------------------- #
     merged: List[Tuple[float, float, datetime, datetime]] = []
     for lat, lon, s_dt, e_dt in coords:
         if (
             merged
-            and merged[-1][3].strftime("%Y-%m-%d %H:%M")
-            == s_dt.strftime("%Y-%m-%d %H:%M")
+            and merged[-1][3].strftime("%Y-%m-%d %H:%M") == s_dt.strftime("%Y-%m-%d %H:%M")
         ):
             merged[-1] = (merged[-1][0], merged[-1][1], merged[-1][2], e_dt)
         else:
             merged.append((lat, lon, s_dt, e_dt))
 
-    # --------------------------------------------------------------------- #
-    # 3. Adressen holen
-    # --------------------------------------------------------------------- #
     enriched: List[dict] = []
     for lat, lon, s_dt, e_dt in merged:
         addr = reverse_geocode(lat, lon)
-        addr.update(
-            {
-                "lat": lat,
-                "lon": lon,
-                "start_dt": s_dt.astimezone(BERLIN),
-                "end_dt": e_dt.astimezone(BERLIN),
-            }
-        )
+        addr.update({
+            "lat": lat,
+            "lon": lon,
+            "start_dt": s_dt.astimezone(BERLIN),
+            "end_dt": e_dt.astimezone(BERLIN),
+        })
         enriched.append(addr)
 
-    # --------------------------------------------------------------------- #
-    # 4. Adress-/Distanz-Merging
-    # --------------------------------------------------------------------- #
     final: List[dict] = []
     for item in enriched:
         if not final:
@@ -433,20 +215,15 @@ def analyze_gpx(
         else:
             final.append(item)
 
-    # --------------------------------------------------------------------- #
-    # 5. Distanz, Tempo & Verkehrsmittel je Weg-Etappe
-    # --------------------------------------------------------------------- #
     for idx in range(len(final) - 1):
-        end_prev_utc   = final[idx]["end_dt"].astimezone(timezone.utc)
+        end_prev_utc = final[idx]["end_dt"].astimezone(timezone.utc)
         start_next_utc = final[idx + 1]["start_dt"].astimezone(timezone.utc)
 
-        # Distanz entlang der Spur
         dist_m_real = 0.0
         started = False
         for i in range(len(pts) - 1):
             t0, lat0, lon0 = pts[i]
             t1, lat1, lon1 = pts[i + 1]
-
             if t1 < end_prev_utc:
                 continue
             if not started and t0 >= end_prev_utc:
@@ -464,9 +241,6 @@ def analyze_gpx(
         if speed_kmh is not None:
             final[idx]["next_speed_kmh_real"] = speed_kmh
 
-        # -----------------------------
-        # Neue ML-/Heuristik-Klassifikation
-        # -----------------------------
         seg_pts = [
             (lat, lon)
             for t, lat, lon in pts
@@ -483,5 +257,42 @@ def analyze_gpx(
             [lat for lat, _ in seg_pts],
             [lon for _, lon in seg_pts],
         )
+
+        # -----------------------------
+        # Analyse von Haltemustern
+        # -----------------------------
+        HALT_SPEED_THRESHOLD = 3.0
+        MIN_HALT_DURATION = 10
+
+        halts = []
+        halt_start = None
+        for i in range(len(pts) - 1):
+            t0, lat0, lon0 = pts[i]
+            t1, lat1, lon1 = pts[i + 1]
+
+            if not (end_prev_utc <= t0 <= start_next_utc and end_prev_utc <= t1 <= start_next_utc):
+                continue
+
+            dist_m = haversine(lat0, lon0, lat1, lon1)
+            duration_s = (t1 - t0).total_seconds()
+            speed_kmh = (dist_m / duration_s) * 3.6 if duration_s > 0 else 0
+
+            if speed_kmh <= HALT_SPEED_THRESHOLD:
+                if halt_start is None:
+                    halt_start = t0
+            else:
+                if halt_start:
+                    halt_duration = (t0 - halt_start).total_seconds()
+                    if halt_duration >= MIN_HALT_DURATION:
+                        halts.append(halt_duration)
+                    halt_start = None
+
+        if halt_start:
+            halt_duration = (start_next_utc - halt_start).total_seconds()
+            if halt_duration >= MIN_HALT_DURATION:
+                halts.append(halt_duration)
+
+        final[idx]["next_halt_count"] = len(halts)
+        final[idx]["next_halt_avg_duration"] = round(sum(halts)/len(halts), 1) if halts else 0.0
 
     return final
