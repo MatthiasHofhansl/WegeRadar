@@ -227,3 +227,4 @@ def classify_main_mode(
 # Rest der Datei unverändert: reverse_geocode, _extract_name, _same_address,
 # analyse_gpx, app.py, benutzeroberfläche.py bleiben wie zuvor.
 >>>>>>> fb22545658771014cb1a75f3a51e4ddfb8b6171e
+#
