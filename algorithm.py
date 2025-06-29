@@ -67,12 +67,12 @@ SNAP_RADIUS_M          = 10            # Punkt ↔ Netz (Klassifizierung) in m
 # --------------------------------------------------------------------------- #
 # typische Geschwindigkeits­bereiche (km/h)
 _SPEED_BANDS = {
-    "foot": (0, 9),
-    "bike": (9, 30),
-    "car":  (30, 120),
-    "bus":  (15, 70),
-    "tram": (15, 70),
-    "rail": (40, 250),
+    "Zu Fuß": (0, 9),
+    "Fahhrad": (9, 30),
+    "Auto":  (30, 120),
+    "Bus":  (15, 70),
+    "Straßenbahn": (15, 70),
+    "Zug": (40, 250),
 }
 
 # OSM-Tag-Filter je Modus

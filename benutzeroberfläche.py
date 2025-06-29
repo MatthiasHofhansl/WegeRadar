@@ -7,6 +7,8 @@ Tk-Oberfläche für WegeRadar.
 * Orts-/Weg-Liste scrollt separat.
 * Schwarze Linie bis ganz rechts.
 * Datum-Label bündig zu „Teilnehmer(in):“.
+* Pro Weg zwei Zeilen, zweite steht exakt unter „Weg … │“ und
+  zeigt das vollständige, absteigend sortierte Verkehrsmittel-Ranking.
 """
 
 from __future__ import annotations
@@ -197,7 +199,6 @@ class WegeRadar:
             anchor="w",
         ).pack(side="left", padx=10, pady=5)
 
-        # Roter Button: löscht ALLE Inhalte außer der Teilnehmerliste
         tk.Button(
             head,
             text="✖",
@@ -308,7 +309,6 @@ class WegeRadar:
                 dist_km = p.get("next_dist_km_real")
                 speed_kmh = p.get("next_speed_kmh_real")
 
-                # Fallbacks (sollten selten nötig sein)
                 if dist_km is None:
                     nxt = places[idx]
                     dist_km = _haversine_km(p["lat"], p["lon"], nxt["lat"], nxt["lon"])
@@ -317,38 +317,40 @@ class WegeRadar:
                     hours = (nxt["start_dt"] - p["end_dt"]).total_seconds() / 3600
                     speed_kmh = dist_km / hours if hours > 0 else 0.0
 
-                # Hauptzeile
-                weg_text = (
-                    f"Weg {idx} │ Distanz: {dist_km:.2f} km; "
+                # Zeile 1: Weg, Distanz, Tempo
+                prefix = f"Weg {idx} │ "
+                line1 = (
+                    f"{prefix}Distanz: {dist_km:.2f} km; "
                     f"Durchschnittliche Geschwindigkeit: {speed_kmh:.2f} km/h"
                 )
-                mode_rank = p.get("next_mode_rank")
-                if mode_rank:
-                    weg_text += f"; Verkehrsmittel: {mode_rank['best']}"
 
                 tk.Label(
                     self.list_inner,
-                    text=weg_text,
+                    text=line1,
                     font=("Arial", 11, "italic"),
                     bg="white",
                     anchor="w",
-                ).pack(fill="x", padx=40, pady=(0, 2))
+                ).pack(fill="x", padx=40, pady=(0, 1))
 
-                # Detailzeile (Scores)
+                # Zeile 2: Verkehrsmittel-Ranking
+                mode_rank = p.get("next_mode_rank")
                 if mode_rank:
-                    rank_str = ", ".join(
-                        f"{m}: {mode_rank[m]*100:.0f}%"
-                        for m in ("foot", "bike", "car", "bus", "tram", "rail")
-                        if m in mode_rank
+                    rank_items = sorted(
+                        [(m, mode_rank[m]) for m in mode_rank if m != "best"],
+                        key=lambda x: x[1],
+                        reverse=True,
                     )
+                    # alle Modi anzeigen (auch 0 %)
+                    rank_str = " │ ".join(f"{m} {s*100:.0f} %" for m, s in rank_items)
+                    line2 = f"Verkehrsmittel: {rank_str}"
+
                     tk.Label(
                         self.list_inner,
-                        text="➜ " + rank_str,
-                        font=("Arial", 10),
-                        fg="#555555",
+                        text=line2,
+                        font=("Arial", 11, "italic"),
                         bg="white",
                         anchor="w",
-                    ).pack(fill="x", padx=60, pady=(0, 5))
+                    ).pack(fill="x", padx=40, pady=(0, 5))
 
 
 # --------------------------------------------------------------------------- #
